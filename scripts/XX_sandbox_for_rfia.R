@@ -58,7 +58,7 @@ tbl_a <- plot_a %>%
   mutate(PLT_CN = CN) %>%
   left_join(cond_a, by = 'PLT_CN') %>%
   left_join(tree_a, by = c('PLT_CN', 'CONDID'))
-
+    
 tbl_b <- plot_b %>%
   mutate(PLT_CN = CN) %>%
   left_join(cond_b, by = 'PLT_CN') %>%
