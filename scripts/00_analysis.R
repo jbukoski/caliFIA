@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Data exploration with CA FIA dataset
 
 
@@ -32,8 +33,3 @@ length(unique(plotDat$PLOT))
 # Extract years of inventory from CA
 
 sort(unique(plotDat$INVYR))
-
-# Odd that there's a
-
-
-
