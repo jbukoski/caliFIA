@@ -94,7 +94,7 @@ filt <- dat$COND %>%
   group_by(PLOT) %>%
   mutate(nyrs = length(unique(INVYR))) %>%
   ungroup() %>%
-  filter(nyrs == 2)
+  filter(nyrs >= 2)
 
 plts_w_repeats <- nrow(filt)
 
@@ -172,3 +172,59 @@ Code indicating whether landowner owns and operates a primary wood-processing pl
 
     $ 0 = Land is not owned by industrial owner with wood-processing plant
     $ 1 = Land is owned by industrial owner with wood-processing plant
+    
+```{r}
+
+test <- filt %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32)) %>%
+  select(PLOT, INVYR, DSTRBCD1, OWNGRPCD, nyrs) %>%
+  group_by(DSTRBCD1, OWNGRPCD) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  mutate(percent = round(n / sum(n) * 100, 1)) %>%
+  select(DSTRBCD1, OWNGRPCD, n, percent)
+  
+  group_by(DSTRBCD1) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  mutate(percent = round(n / sum(n) * 100, 1)) %>%
+  select(DSTRBCD1, n, percent)
+
+```
+
+---
+
+### Look at FERS plots that Jeremy sent in a .DB file
+
+Note, originally sent in a .accdb file (MS Access), but was not able to open.
+
+```{r, message = F}
+
+# Install RSQLite - need the SQLite driver to access .db file 
+
+# install.package("RSQLite")
+
+library("RSQLite")
+
+```
+
+
+```{r}
+
+filename <- "~/Desktop/FSP2019.DB"
+
+sqlite.driver <- dbDriver("SQLite")
+
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+db
+
+```
+
+```{r}
+
+dbListTables(db)
+
+fersPlts <- dbReadTable(db, "PlotList")
+
+```
