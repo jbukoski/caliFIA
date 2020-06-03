@@ -52,18 +52,11 @@ Download all FIA data for California, uncomment to download data
 
 ```
 
-After downloading data and saving to file, can simply load data
+After downloading data and saving to file, can simply load data. Load in the data and view the names of the tables within the object.
 
 ```{r}
 
 dat <- readFIA("../data/")
-
-```
-
-View the names of the tables within the object
-
-```{r}
-
 sort(names(dat))
 
 ```
@@ -87,18 +80,17 @@ Years of inventories: ``r invyrs``
 
 ```{r}
 
-# Count number of plots with repeat measurements
+# Count number of plots with repeat measurements since 2000
+# Note, plot IDs < 50000 are from inventory year 1994. Drop them from the analysis.
 
 filt <- dat$COND %>%
-  filter(INVYR != 1994) %>%
+  filter(INVYR != 1994) %>%           
   group_by(PLOT) %>%
   mutate(nyrs = length(unique(INVYR))) %>%
   ungroup() %>%
   filter(nyrs >= 2)
 
 plts_w_repeats <- nrow(filt)
-
-# Note, plot IDs < 50000 are from inventory year 1994. Drop them from the analysis.
 
 ```
 
@@ -173,6 +165,15 @@ Code indicating whether landowner owns and operates a primary wood-processing pl
     $ 0 = Land is not owned by industrial owner with wood-processing plant
     $ 1 = Land is owned by industrial owner with wood-processing plant
     
+### Looking at fire disturbance codes
+
+Fire disturbance codes are stored in the "DSTRBCD1, DSTRBCD2, and DSTRBCD3" variables.
+Unclear what the differences are between the different codes so far.
+
+  * 30 - general fire
+  * 31 - ground fire
+  * 32 - crown fire
+    
 ```{r}
 
 test <- filt %>%
@@ -183,12 +184,6 @@ test <- filt %>%
   ungroup() %>%
   mutate(percent = round(n / sum(n) * 100, 1)) %>%
   select(DSTRBCD1, OWNGRPCD, n, percent)
-  
-  group_by(DSTRBCD1) %>%
-  summarize(n = n()) %>%
-  ungroup() %>%
-  mutate(percent = round(n / sum(n) * 100, 1)) %>%
-  select(DSTRBCD1, n, percent)
 
 ```
 
@@ -201,7 +196,6 @@ Note, originally sent in a .accdb file (MS Access), but was not able to open.
 ```{r, message = F}
 
 # Install RSQLite - need the SQLite driver to access .db file 
-
 # install.package("RSQLite")
 
 library("RSQLite")
@@ -211,20 +205,94 @@ library("RSQLite")
 
 ```{r}
 
-filename <- "~/Desktop/FSP2019.DB"
-
+filename <- "../data/FSP2019.DB"
 sqlite.driver <- dbDriver("SQLite")
-
 db <- dbConnect(sqlite.driver, dbname = filename)
-
-db
 
 ```
 
 ```{r}
 
 dbListTables(db)
-
 fersPlts <- dbReadTable(db, "PlotList")
 
+fersPlts
+
 ```
+
+### Look at how many FERS plots link to the FIA national dataset
+
+```{r}
+
+nFersByPLT_CN <- sum(fersPlts$PLT_CN %in% plotDat$CN)
+
+nFersByPLOT <- sum(fersPlts$PLOT %in% filt$PLOT)
+
+caFERS <- fersPlts %>%
+  mutate(ForestedCondPropPostFire = as.numeric(ForestedCondPropPostFire),
+         PREFIRE_PLT_CN = as.numeric(PREFIRE_PLT_CN),
+         PREV_PLT_CN = as.numeric(PREV_PLT_CN)) %>%
+  filter(!is.na(ForestedCondPropPostFire)) %>%
+  filter(!is.na(PREFIRE_PLT_CN) | !is.na(PREV_PLT_CN)) %>%
+  filter(STATECD == "6")
+
+caFERS %>%
+  filter(INTENSITY == "1")
+
+sum(c(caFERS$PLT_CN, caFERS$PREFIRE_PLT_CN, caFERS$PREV_PLT_CN) %in% plotDat$CN)
+
+```
+
+  $ "INTENSITY" {in PLOT table} - code used to identify federal base grid annual inventory plots and plots that have been added to intensify a particular sample. INTENSITY = 1 is part of federal base grid; supplemental plots have INTENSITY set to higher numbers depending on the amount of plot intensification chosen for the particular estimation unit.
+  $ "CN" {in PLOT table} - Sequence number. A unique sequence number used to identify a condition record.
+  
+Explain control numbers?
+
+
+
+What do the Intensity codes 201, 202, 203, and 204 correspond to?
+
+Does ownership data exist for the FERS plots?
+
+```{r}
+
+fers_nFIA_plts <- plotDat %>%
+  filter(PLOT %in% filter(caFERS, INTENSITY == "1")$PLOT) %>%   # Filter national data to those plots that are in FERS
+  left_join(dat$COND, by = c("CN" = "PLT_CN", "PLOT", "INVYR"))   # Join the COND table for those plots
+  
+nrow(fers_nFIA_plts)
+
+length(unique(fers_nFIA_plts$PLOT))
+
+arrange(fers_nFIA_plts, PLOT, INVYR)
+
+fers_nFIA_plts$DSTRBCD1
+
+filter(fers_nFIA_plts, PLOT == 50800)
+
+fers_nFIA_plts %>%
+  select(PLOT, OWNCD, OWNGRPCD) %>%
+  distinct %>%
+  group_by(OWNGRPCD) %>%
+  summarize(n = n()) %>%
+  select(OWNGRPCD, n)
+
+
+
+
+both <- fers_nFIA_plts %>%
+  bind_rows(mutate(caFERS, 
+                   CN = as.numeric(CN),
+                   INVYR = as.integer(INVYR),
+                   PLOT = as.integer(PLOT),
+                   LAT = as.numeric(LAT),
+                   LON = as.numeric(LON),
+                   INTENSITY = as.integer(INTENSITY))) %>%
+  arrange(PLOT, INVYR)
+
+both %>% View
+
+
+```
+
+
