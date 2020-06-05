@@ -185,6 +185,8 @@ test <- filt %>%
   mutate(percent = round(n / sum(n) * 100, 1)) %>%
   select(DSTRBCD1, OWNGRPCD, n, percent)
 
+test
+
 ```
 
 ---
@@ -271,11 +273,12 @@ fers_nFIA_plts$DSTRBCD1
 filter(fers_nFIA_plts, PLOT == 50800)
 
 fers_nFIA_plts %>%
-  select(PLOT, OWNCD, OWNGRPCD) %>%
+  select(PLOT, OWNCD, OWNGRPCD, DSTRBCD1) %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32)) %>%
   distinct %>%
-  group_by(OWNGRPCD) %>%
+  group_by(OWNGRPCD, DSTRBCD1) %>%
   summarize(n = n()) %>%
-  select(OWNGRPCD, n)
+  select(DSTRBCD1, OWNGRPCD, n)
 
 
 
@@ -292,7 +295,28 @@ both <- fers_nFIA_plts %>%
 
 both %>% View
 
+private_plts <- filter(fers_nFIA_plts, OWNGRPCD == 40) %>% pull(PLOT)
 
+fers_nFIA_plts %>%
+  filter(PLOT %in% private_plts) %>% 
+  arrange(PLOT, INVYR) %>%
+  select(PLOT, INVYR, OWNGRPCD, CONDID) %>%
+  group_by(PLOT) %>%
+  summarize(n = length(unique(OWNGRPCD))) %>%
+  View
+
+
+fers_nFIA_plts %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32)) %>%
+  group_by(OWNGRPCD, TRTCD1) %>%
+  summarize(n = n()) %>%
+  select(OWNGRPCD, TRTCD1, n)
+
+  
+dat$COND %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32) & DSTRBCD2 %in% c(30, 31, 32)) %>%
+  View
+  
 ```
 
 
