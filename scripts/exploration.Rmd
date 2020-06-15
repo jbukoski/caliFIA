@@ -250,8 +250,6 @@ sum(c(caFERS$PLT_CN, caFERS$PREFIRE_PLT_CN, caFERS$PREV_PLT_CN) %in% plotDat$CN)
   
 Explain control numbers?
 
-
-
 What do the Intensity codes 201, 202, 203, and 204 correspond to?
 
 Does ownership data exist for the FERS plots?
@@ -317,4 +315,25 @@ dat$COND %>%
   filter(DSTRBCD1 %in% c(30, 31, 32) & DSTRBCD2 %in% c(30, 31, 32)) %>%
   View
   
+```
+
+Build a dataframe that is just fire disturbances and that collapses the forest type code (FORTYPCD) to forest groups (FORTYPGRP) with conifers (FORTYPGRP = 1), hardwoods (FORTYPGRP = 2), and nonstocked plots (999).
+
+"Nonstocked forest land is land that currently has less than 10 percent stocking but formerly met the definition of forest land. Forest conditions meeting this definition have few, if any, trees sampled. In these instances, the algorithm cannot assign a specific forest type and the resulting forest type code is 999, meaning nonstocked. See GSSTKCD for information on estimates of nonstocked areas."
+
+```{r}
+
+fiaFirePlts <- filt %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32))
+
+fiaFirePlts <- fiaFirePlts %>%
+  mutate(FORGRPCD = ifelse(FORTYPCD < 400, "1", 
+                           ifelse(FORTYPCD > 400 & FORTYPCD < 999, "2", FORTYPCD)))
+
+fiaFirePlts %>%
+  group_by(DSTRBCD1, OWNGRPCD, FORGRPCD) %>%
+  summarise(n = n()) %>%
+  select(DSTRBCD1, OWNGRPCD, FORGRPCD, n) %>% View
+
+
 ```
