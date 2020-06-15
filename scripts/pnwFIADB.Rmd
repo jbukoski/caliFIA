@@ -1,0 +1,74 @@
+---
+title: "pnw_fiadb.Rmd"
+author: "Jacob Bukoski"
+date: "6/15/2020"
+output: html_document
+---
+
+
+### Analyze the PNW FIADB
+
+```{r}
+
+library(RSQLite)
+library(tidyverse)
+
+```
+
+```{r}
+
+filename <- "../data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+dbListTables(db)
+
+pnwFIADBplts <- dbReadTable(db, "PLOT")
+pnwFIADBcond <- dbReadTable(db, "COND")
+pnwFIADBcond_pnw <- dbReadTable(db, "COND_PNW")    # This table has historical disturbance codes
+
+sort(colnames(pnwFIADBcond_pnw))
+
+sort(unique(pnwFIADBcond_pnw$HIST_DSTRBCD1_PNWRS))
+sort(unique(pnwFIADBcond_pnw$HIST_DSTRBYR1_PNWRS))
+
+```
+
+```{r}
+
+join_vars <- c("STATECD", "PLOT", "INVYR")
+
+pnwFIADB_CA <- pnwFIADBplts %>%
+  #filter(STATECD == 6) %>%
+  left_join(pnwFIADBcond, by = join_vars) %>%     # Join COND table
+  left_join(pnwFIADBcond_pnw, by = join_vars)     # Join historical disturbances
+
+```
+
+```{r}
+
+filt <- pnwFIADB_CA %>%
+  filter(DSTRBCD1 %in% c(30, 31, 32)) %>%
+  select(PLOT, STATECD, INVYR, DSTRBCD1, DSTRBCD1_PNWRS, DSTRBYR1, DSTRBYR1_PNWRS,
+         DSTRBCD2, DSTRBCD2_PNWRS, HIST_DSTRBCD1_PNWRS,
+         HIST_DSTRBCD2_PNWRS, HIST_DSTRBYR1_PNWRS, HIST_DSTRBYR2_PNWRS)
+
+histFire <- filt %>%
+  filter(HIST_DSTRBCD1_PNWRS %in% c(30, 31, 32))
+
+
+histFire %>%
+  select(PLOT, STATECD, INVYR, DSTRBCD1, DSTRBYR1,
+         HIST_DSTRBCD1_PNWRS, HIST_DSTRBYR1_PNWRS) %>%
+  distinct() %>%
+  arrange(HIST_DSTRBYR1_PNWRS) %>%
+  View
+
+histFire %>%
+  mutate(time_btwn_fires = DSTRBYR1 - HIST_DSTRBYR1_PNWRS) %>%
+  select(PLOT, time_btwn_fires) %>% 
+  distinct() %>%
+  View
+
+```
+
