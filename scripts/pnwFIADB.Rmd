@@ -27,10 +27,6 @@ pnwFIADBplts <- dbReadTable(db, "PLOT")
 pnwFIADBcond <- dbReadTable(db, "COND")
 pnwFIADBcond_pnw <- dbReadTable(db, "COND_PNW")    # This table has historical disturbance codes
 
-sort(colnames(pnwFIADBcond_pnw))
-
-sort(unique(pnwFIADBcond_pnw$HIST_DSTRBCD1_PNWRS))
-sort(unique(pnwFIADBcond_pnw$HIST_DSTRBYR1_PNWRS))
   
 ```
 
@@ -47,11 +43,40 @@ pnwFIADB_CA <- pnwFIADBplts %>%
 
 ```{r}
 
+histFireFull <- pnwFIADB_CA %>%
+  filter(HIST_DSTRBCD1_PNWRS %in% c(30, 31, 32)) %>%
+  filter(STATECD != 2)
+
+histFireFull %>% 
+  mutate(FORGRPCD = ifelse(FORTYPCD < 400, 1, 
+                           ifelse(FORTYPCD > 400 & FORTYPCD < 999, 2, 999))) %>%
+  select(PLOT, HIST_DSTRBCD1_PNWRS, HIST_DSTRBYR1_PNWRS, OWNGRPCD, FORGRPCD) %>%
+  distinct() %>% 
+  group_by(HIST_DSTRBCD1_PNWRS, OWNGRPCD, FORGRPCD) %>%
+  summarise(n = n()) %>%
+  select(HIST_DSTRBCD1_PNWRS, OWNGRPCD, FORGRPCD, n) %>% 
+  View
+
+histFireFull %>% 
+  filter(HIST_DSTRBYR1_PNWRS > 1900) %>%
+  mutate(FORGRPCD = ifelse(FORTYPCD < 400, 1, 
+                           ifelse(FORTYPCD > 400 & FORTYPCD < 999, 2, 999))) %>%
+  select(PLOT, HIST_DSTRBCD1_PNWRS, HIST_DSTRBYR1_PNWRS) %>%
+  distinct() %>% 
+  nrow
+
+
+```
+
+---
+
+### Filtering to those plots with both historical fire disturbance as well as more recent fire disturbance
+
+
+```{r}
+
 filt <- pnwFIADB_CA %>%
-  filter(DSTRBCD1 %in% c(30, 31, 32)) %>%
-  select(PLOT, STATECD, INVYR, DSTRBCD1, DSTRBCD1_PNWRS, DSTRBYR1, DSTRBYR1_PNWRS,
-         DSTRBCD2, DSTRBCD2_PNWRS, HIST_DSTRBCD1_PNWRS,
-         HIST_DSTRBCD2_PNWRS, HIST_DSTRBYR1_PNWRS, HIST_DSTRBYR2_PNWRS, OWNGRPCD)
+  filter(DSTRBCD1 %in% c(30, 31, 32))
 
 histFire <- filt %>%
   filter(HIST_DSTRBCD1_PNWRS %in% c(30, 31, 32))
@@ -71,4 +96,25 @@ histFire %>%
   View
 
 ```
+
+
+### Accessing and exploring the periodic inventory database
+
+
+```{r}
+
+
+filename <- "../data/IDB_CD/Database_Version_ 2.0_(zipped)/Database_Version_2.0/idb_db.sql"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename, synchronous = NULL)
+
+dbListTables(db)
+
+pnwFIADBplts <- dbReadTable(db, "PLOT")
+pnwFIADBcond <- dbReadTable(db, "COND")
+pnwFIADBcond_pnw <- dbReadTable(db, "COND_PNW")    # This table has historical disturbance codes
+
+
+```
+
 
