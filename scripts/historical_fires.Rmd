@@ -7,6 +7,10 @@ output: html_document
 
 Examining database that Jeremy sent
 
+Notes:
+
+  - Need to identify historical fires 
+
 
 ```{r}
 
@@ -33,25 +37,32 @@ db_COND_LB %>%
   filter(STATECD == 6) %>%
   mutate(intens_chk = ifelse(INTENSITY == 1, 1, 0)) %>%
   group_by(intens_chk, Source) %>%
-  summarize( n = n()) %>%
+  summarize(n = n()) %>%
   select(intens_chk, Source, n)
 
 # Add forest vs. non-forest plots
 
 test <- db_COND_LB %>%
-  filter(DSTRBYR1 > 1920, STATECD == 6) %>%
+  filter(DSTRBYR1 >= 1920, STATECD == 6, INTENSITY == 1) %>%
   select(PLOT_FIADB, INVYR, DSTRBYR1) %>%
-  distinct() %>%
+  #distinct() %>%
   group_by(PLOT_FIADB) %>%
   mutate( n = n()) %>%
   ungroup() %>%         
   filter( n >= 2) %>%
   arrange(PLOT_FIADB, DSTRBYR1)
 
-
 length(unique(test$PLOT_FIADB))
 
-head(test)
+head(db_COND_LB)
+
+CA_dat <- db_COND_LB %>%
+  filter(STATECD == 6) %>%
+  arrange(PLOT_FIADB, DSTRBYR1)
+
+unique(CA_dat$Source)
+
+hist(CA_dat, breaks = 100, xlim = c(1900, 2020))
 
 ```
 
