@@ -9,7 +9,9 @@ Examining database that Jeremy sent
 
 Notes:
 
-  - Need to identify historical fires 
+  - Need to identify historical fires
+  - Filter all plots to those in CA (STATECD == 6)
+  - 
 
 
 ```{r}
@@ -30,8 +32,25 @@ db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
 
 ```{r}
 
+all_dat <- db_PLOT_LB %>%
+  left_join(db_COND_LB)
+
 head(db_COND_LB)
 colnames(db_COND_LB)
+
+q1 <- db_PLOT_LB %>%
+  select(STATECD, PLOT_FIADB, DSTRBYR1, ForestAtLastPostDistVisit) %>%
+  filter(ForestAtLastPostDistVisit == -1) %>%
+  group_by(STATECD, PLOT_FIADB) %>%
+  mutate(n = n())
+        
+q2 <- q1 %>%
+  select(STATECD, PLOT_FIADB, n) %>%
+  filter(n >= 2) %>%
+  group_by(STATECD) %>%
+  summarise(n2 = n_distinct(PLOT_FIADB))
+  
+
 
 db_COND_LB %>%
   filter(STATECD == 6) %>%
@@ -42,19 +61,18 @@ db_COND_LB %>%
 
 # Add forest vs. non-forest plots
 
-test <- db_COND_LB %>%
-  filter(DSTRBYR1 >= 1920, STATECD == 6, INTENSITY == 1) %>%
-  select(PLOT_FIADB, INVYR, DSTRBYR1) %>%
-  #distinct() %>%
+test <- all_dat %>%
+  filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
+  select(PLOT_FIADB, DSTRBYR1) %>%
+  distinct() %>%
   group_by(PLOT_FIADB) %>%
-  mutate( n = n()) %>%
-  ungroup() %>%         
-  filter( n >= 2) %>%
-  arrange(PLOT_FIADB, DSTRBYR1)
+  mutate(n = n()) %>%
+  filter(n >= 2) %>%
+  summarise(n2 = n_distinct(PLOT_FIADB))
 
 length(unique(test$PLOT_FIADB))
 
-head(db_COND_LB)
+(db_COND_LB)
 
 CA_dat <- db_COND_LB %>%
   filter(STATECD == 6) %>%
