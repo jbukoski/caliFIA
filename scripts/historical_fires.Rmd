@@ -16,6 +16,7 @@ Notes:
 
 ```{r}
 
+library(readxl)
 library(RSQLite)
 library(tidyverse)
 
@@ -84,4 +85,20 @@ hist(CA_dat, breaks = 100, xlim = c(1900, 2020))
 
 ```
 
+Read in excel table with FIA plot and fire perimeter intersections
 
+Columns:
+
+- FireDisturbCodedOnPlot:
+  - False: disturbance NOT coded for any condition at any visit under annual inventory
+  - True: disturbance WAS coded but for a pre-1960 fire (SO, does not mean that a post-1960 disturbance was coded)
+
+```{r}
+
+intrsct_dat <- read_excel("../data/FireOverlay2.xlsx")
+
+intrsct_dat %>%
+  arrange(plot_fiadb, FireYear) %>%
+  View
+
+```
