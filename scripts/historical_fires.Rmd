@@ -5,14 +5,9 @@ date: "6/17/2020"
 output: html_document
 ---
 
-Examining database that Jeremy sent
+### Examining database that Jeremy sent
 
-Notes:
-
-  - Need to identify historical fires
-  - Filter all plots to those in CA (STATECD == 6)
-  - 
-
+Historical fire data
 
 ```{r}
 
@@ -36,56 +31,46 @@ db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
 all_dat <- db_PLOT_LB %>%
   left_join(db_COND_LB)
 
-head(db_COND_LB)
-colnames(db_COND_LB)
-
-q1 <- db_PLOT_LB %>%
-  select(STATECD, PLOT_FIADB, DSTRBYR1, ForestAtLastPostDistVisit) %>%
-  filter(ForestAtLastPostDistVisit == -1) %>%
-  group_by(STATECD, PLOT_FIADB) %>%
-  mutate(n = n())
-        
-q2 <- q1 %>%
-  select(STATECD, PLOT_FIADB, n) %>%
-  filter(n >= 2) %>%
-  group_by(STATECD) %>%
-  summarise(n2 = n_distinct(PLOT_FIADB))
-  
-
-
-db_COND_LB %>%
-  filter(STATECD == 6) %>%
-  mutate(intens_chk = ifelse(INTENSITY == 1, 1, 0)) %>%
-  group_by(intens_chk, Source) %>%
-  summarize(n = n()) %>%
-  select(intens_chk, Source, n)
-
-# Add forest vs. non-forest plots
-
-test <- all_dat %>%
-  filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
-  select(PLOT_FIADB, DSTRBYR1) %>%
-  distinct() %>%
-  group_by(PLOT_FIADB) %>%
+q1 <- all_dat %>%
+  select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, ForestAtLastPostDistVisit) %>%
+  filter(ForestAtLastPostDistVisit == -1, STATECD == 6) %>%
+  group_by(PLOT_FIADB, DSTRBCD1, CONDID) %>%
   mutate(n = n()) %>%
   filter(n >= 2) %>%
-  summarise(n2 = n_distinct(PLOT_FIADB))
+  arrange(PLOT_FIADB, DSTRBYR1, INVYR) %>%
+  ungroup()
 
-length(unique(test$PLOT_FIADB))
 
-(db_COND_LB)
+q2 <- q1 %>%
+  group_by(PLOT_FIADB, DSTRBCD1, CONDID) %>%
+  mutate(n2 = n_distinct(interaction(PLOT_FIADB, DSTRBYR1))) %>%
+  filter(n2 >= 2) %>%
+  select(-ForestAtLastPostDistVisit, -n) %>%
+  mutate(TimeBtwnFires = max(DSTRBYR1) - min(DSTRBYR1))
 
-CA_dat <- db_COND_LB %>%
-  filter(STATECD == 6) %>%
-  arrange(PLOT_FIADB, DSTRBYR1)
-
-unique(CA_dat$Source)
-
-hist(CA_dat, breaks = 100, xlim = c(1900, 2020))
+# Need to handle 9999 plots
+# Need to resolve plots with short times between fires
 
 ```
 
-Read in excel table with FIA plot and fire perimeter intersections
+### Plotting some of the numbers
+
+```{r}
+
+plt_dat <- q2 %>%
+  filter(TimeBtwnFires <= 252)
+  
+plt_dat %>%
+  select(PLOT_FIADB, TimeBtwnFires) %>%
+  distinct() %>%
+  pull(TimeBtwnFires) %>%
+  hist(breaks = seq(0, 260, 10),
+       main = "Histogram of time between fires for distinct plots")
+
+```
+
+
+### Read in excel table with FIA plot and fire perimeter intersections
 
 Columns:
 
@@ -95,10 +80,43 @@ Columns:
 
 ```{r}
 
-intrsct_dat <- read_excel("../data/FireOverlay2.xlsx")
-
-intrsct_dat %>%
+intrsct_dat <- read_excel("../data/FireOverlay2.xlsx") %>%
   arrange(plot_fiadb, FireYear) %>%
-  View
+  rename(PerimFireYear = FireYear)
+
+colnames(intrsct_dat)
+```
+
+```{r}
+
+joined_dat <- q2 %>%
+  left_join(intrsct_dat, by = c("PLOT_FIADB" = "plot_fiadb"), keep = T) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, TimeBtwnFires, PerimFireYear) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(match = DSTRBYR1 %in% PerimFireYear,
+         n = n_distinct(match))
+
+```
+
+```{r}
+
+confirmed <- joined_dat %>%
+  filter(match == TRUE, n == 1)
+
+prtly_cnfrmd <- joined_dat %>%
+  filter(n == 2)
+
+uncnfrmd <- joined_dat %>%
+  filter(match == FALSE, n == 1)
+
+length(unique(confirmed$PLOT_FIADB))
+length(unique(prtly_cnfrmd$PLOT_FIADB))
+length(unique(uncnfrmd$PLOT_FIADB))
+
+```
+
+```{r}
+
+
 
 ```
