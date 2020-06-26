@@ -34,9 +34,9 @@ q1_jsf <- db_PLOT_LB %>%
   filter(ForestAtLastPostDistVisit == -1) %>%
   select(STATECD, PLOT_FIADB, DSTRBYR1) %>%
   group_by(STATECD, PLOT_FIADB) %>%
-  #mutate(n = n()) %>%    # This is the problematic line: should be n_distinct(DSTRBYR1) rather than n()
-  mutate(n = n_distinct(DSTRBYR1)) %>%
-  filter(n >= 2)         # Without using n_distinct above, it keeps plots with multiple conditions, which is incorrect
+  mutate(n = n()) %>%    # This is the problematic line: should be n_distinct(DSTRBYR1) rather than n()
+  #mutate(n = n_distinct(DSTRBYR1)) %>%
+  filter(n >= 2)         # Without using n_distinct above, it counts multiple conditions and multiple fire types (e.g., n = 2 on plots with only one fire, but both dstrbcd 31 & 32 were recorded)
 
 q2_jsf <- q1_jsf %>%
   select(STATECD, PLOT_FIADB, n) %>%
@@ -55,7 +55,8 @@ all_dat <- db_PLOT_LB %>%
 q1 <- all_dat %>%
   filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
   select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, ForestAtLastPostDistVisit) %>%
-  group_by(PLOT_FIADB, CONDID) %>%    # Group by additional criteria to better identify unique plots, some plots have 
+  group_by(PLOT_FIADB) %>%    # Group by additional criteria to better identify unique plots, some plots have 
+  #mutate(n = n()) %>%
   mutate(n = n_distinct(DSTRBYR1)) %>%
   filter(n >= 2) %>%
   arrange(PLOT_FIADB, DSTRBYR1, INVYR)
@@ -63,7 +64,7 @@ q1 <- all_dat %>%
 length(unique(q1$PLOT_FIADB))
 
 q2 <- q1 %>%
-  group_by(PLOT_FIADB, CONDID) %>%
+  group_by(PLOT_FIADB) %>%
   mutate(n2 = n_distinct(interaction(PLOT_FIADB, DSTRBYR1))) %>%
   filter(n2 >= 2) %>%
   select(-ForestAtLastPostDistVisit, -n) %>%
@@ -105,17 +106,38 @@ joined_dat <- q2 %>%
          nPerimFires = n_distinct(PerimFireYear)) %>%
   ungroup()
 
+rcnt_jnd_dat <- joined_dat %>%
+  group_by(PLOT_FIADB) %>%
+  filter(!any(DSTRBYR1 < 1960) && n_FIAfires == 2) %>%
+  mutate(match = DSTRBYR1 %in% c(PerimFireYear, PerimFireYear - 1, PerimFireYear + 1, PerimFireYear - 2, PerimFireYear + 2),
+         n = n_distinct(match)) %>%
+  mutate(DstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear)) %>%
+  ungroup()
+  
+
+length(unique(rcnt_jnd_dat$PLOT_FIADB))
+
 ```
 
 ```{r}
 
-confirmed <- joined_dat %>%
-  filter(match == TRUE, n == 1)
+confirmed <- rcnt_jnd_dat %>%
+  filter(match == TRUE, n == 1) %>%
+  mutate(DSTRBYR1 = ifelse(DstncBtwnFireYrs <= 2, PerimFireYear, DSTRBYR1)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
+  ungroup() %>%
+  filter(match == TRUE, n == 1, n_FIAfires == 2)
 
-prtly_cnfrmd <- joined_dat %>%
+prtly_cnfrmd <- rcnt_jnd_dat %>%
+  filter(n == 2) %>%
+  mutate(DSTRBYR1 = ifelse(DstncBtwnFireYrs <= 2, PerimFireYear, DSTRBYR1)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
+  ungroup() %>%
   filter(n == 2)
 
-uncnfrmd <- joined_dat %>%
+uncnfrmd <- rcnt_jnd_dat %>%
   filter(match == FALSE, n == 1)
 
 length(unique(confirmed$PLOT_FIADB))
@@ -133,8 +155,7 @@ Partly confirmed:
 ```{r}
 
 pass1 <- prtly_cnfrmd %>%
-  mutate(keep = match) %>%
-  mutate(keep = ifelse(match == FALSE & DSTRBYR1 < 1960, TRUE, keep))
+  mutate(keep = match)
   
 p1 <- pass1 %>%
   group_by(PLOT_FIADB) %>%
@@ -146,9 +167,7 @@ p1 <- pass1 %>%
 test <- add_row(confirmed, p1)
 
 p2 <- pass1 %>%
-  filter(!(PLOT_FIADB %in% p1$PLOT_FIADB)) %>%
-  mutate(DstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear))
-  
+  filter(!(PLOT_FIADB %in% p1$PLOT_FIADB))
   # Rule ii.
   group_by(PLOT_FIADB, DSTRBYR1) %>%
   mutate(dstnct_invyr = ifelse(keep == FALSE, n_distinct(INVYR), 0)) %>%
