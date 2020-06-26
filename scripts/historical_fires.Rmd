@@ -28,47 +28,53 @@ db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
 
 ```{r}
 
+# Jeremy's query
+
+q1_jsf <- db_PLOT_LB %>%
+  filter(ForestAtLastPostDistVisit == -1) %>%
+  select(STATECD, PLOT_FIADB, DSTRBYR1) %>%
+  group_by(STATECD, PLOT_FIADB) %>%
+  #mutate(n = n()) %>%    # This is the problematic line: should be n_distinct(DSTRBYR1) rather than n()
+  mutate(n = n_distinct(DSTRBYR1)) %>%
+  filter(n >= 2)         # Without using n_distinct above, it keeps plots with multiple conditions, which is incorrect
+
+q2_jsf <- q1_jsf %>%
+  select(STATECD, PLOT_FIADB, n) %>%
+  group_by(STATECD) %>%
+  summarise(n2 = n_distinct(PLOT_FIADB))
+
+```
+
+```{r}
+
 all_dat <- db_PLOT_LB %>%
   left_join(db_COND_LB)
 
-q1 <- all_dat %>%
-  select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, ForestAtLastPostDistVisit) %>%
-  filter(ForestAtLastPostDistVisit == -1, STATECD == 6) %>%
-  group_by(PLOT_FIADB, DSTRBCD1, CONDID) %>%
-  mutate(n = n()) %>%
-  filter(n >= 2) %>%
-  arrange(PLOT_FIADB, DSTRBYR1, INVYR) %>%
-  ungroup()
+#---
 
+q1 <- all_dat %>%
+  filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
+  select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, ForestAtLastPostDistVisit) %>%
+  group_by(PLOT_FIADB, CONDID) %>%    # Group by additional criteria to better identify unique plots, some plots have 
+  mutate(n = n_distinct(DSTRBYR1)) %>%
+  filter(n >= 2) %>%
+  arrange(PLOT_FIADB, DSTRBYR1, INVYR)
+
+length(unique(q1$PLOT_FIADB))
 
 q2 <- q1 %>%
-  group_by(PLOT_FIADB, DSTRBCD1, CONDID) %>%
+  group_by(PLOT_FIADB, CONDID) %>%
   mutate(n2 = n_distinct(interaction(PLOT_FIADB, DSTRBYR1))) %>%
   filter(n2 >= 2) %>%
   select(-ForestAtLastPostDistVisit, -n) %>%
-  mutate(TimeBtwnFires = max(DSTRBYR1) - min(DSTRBYR1))
+  mutate(TimeBtwnFires = max(DSTRBYR1) - min(DSTRBYR1))   # Calculate time between fires
+
+n_distinct(q2$PLOT_FIADB)
 
 # Need to handle 9999 plots
 # Need to resolve plots with short times between fires
 
 ```
-
-### Plotting some of the numbers
-
-```{r}
-
-plt_dat <- q2 %>%
-  filter(TimeBtwnFires <= 252)
-  
-plt_dat %>%
-  select(PLOT_FIADB, TimeBtwnFires) %>%
-  distinct() %>%
-  pull(TimeBtwnFires) %>%
-  hist(breaks = seq(0, 260, 10),
-       main = "Histogram of time between fires for distinct plots")
-
-```
-
 
 ### Read in excel table with FIA plot and fire perimeter intersections
 
@@ -84,17 +90,20 @@ intrsct_dat <- read_excel("../data/FireOverlay2.xlsx") %>%
   arrange(plot_fiadb, FireYear) %>%
   rename(PerimFireYear = FireYear)
 
-colnames(intrsct_dat)
 ```
 
 ```{r}
 
 joined_dat <- q2 %>%
   left_join(intrsct_dat, by = c("PLOT_FIADB" = "plot_fiadb"), keep = T) %>%
-  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, TimeBtwnFires, PerimFireYear) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, TimeBtwnFires, PerimFireYear) %>%
   group_by(PLOT_FIADB) %>%
   mutate(match = DSTRBYR1 %in% PerimFireYear,
-         n = n_distinct(match))
+         n = n_distinct(match)) %>%
+  group_by(PLOT_FIADB, CONDID) %>%
+  mutate(n_FIAfires = n_distinct(DSTRBYR1),
+         nPerimFires = n_distinct(PerimFireYear)) %>%
+  ungroup()
 
 ```
 
@@ -115,8 +124,61 @@ length(unique(uncnfrmd$PLOT_FIADB))
 
 ```
 
+Logical structure for inclusion/exlcusion of the various plots
+
+Confirmed: Keep all confirmed plots!
+Partly confirmed:
+  If more than one 
+  
 ```{r}
 
+pass1 <- prtly_cnfrmd %>%
+  mutate(keep = match) %>%
+  mutate(keep = ifelse(match == FALSE & DSTRBYR1 < 1960, TRUE, keep))
+  
+p1 <- pass1 %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_keep = n_distinct(keep)) %>%
+  ungroup() %>%
+  filter(keep == TRUE, n_keep == 1) %>%
+  select(colnames(confirmed))
+  
+test <- add_row(confirmed, p1)
 
+p2 <- pass1 %>%
+  filter(!(PLOT_FIADB %in% p1$PLOT_FIADB)) %>%
+  mutate(DstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear))
+  
+  # Rule ii.
+  group_by(PLOT_FIADB, DSTRBYR1) %>%
+  mutate(dstnct_invyr = ifelse(keep == FALSE, n_distinct(INVYR), 0)) %>%
+  mutate(keep = ifelse(dstnct_invyr >= 2, TRUE, keep)) %>%
+  ungroup() %>%
+  # Rule iii.
+  group_by(PLOT_FIADB) %>%
+  mutate(yr_dscrpncy = abs(DSTRBYR1  - PerimFireYear),
+         ruleIII = ifelse(TimeBtwnFires < 2, TRUE, FALSE))
+
+
+
+cln_prtly_cnfrmd %>%
+  View()
+
+```
+
+
+### Plotting some of the numbers
+
+```{r}
+
+plt_dat <- q2 %>%
+  filter(TimeBtwnFires <= 252)
+  
+plt_dat %>%
+  select(PLOT_FIADB, TimeBtwnFires) %>%
+  distinct() %>%
+  pull(TimeBtwnFires) %>%
+  hist(breaks = seq(0, 260, 10),
+       main = "Histogram of time between fires for distinct plots")
 
 ```
