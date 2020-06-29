@@ -100,104 +100,323 @@ joined_dat <- q2 %>%
   select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, TimeBtwnFires, PerimFireYear) %>%
   group_by(PLOT_FIADB) %>%
   mutate(match = DSTRBYR1 %in% PerimFireYear,
-         n = n_distinct(match)) %>%
-  group_by(PLOT_FIADB, CONDID) %>%
-  mutate(n_FIAfires = n_distinct(DSTRBYR1),
+         n = n_distinct(match),
+         n_FIAfires = n_distinct(DSTRBYR1),
          nPerimFires = n_distinct(PerimFireYear)) %>%
   ungroup()
 
 rcnt_jnd_dat <- joined_dat %>%
+  filter(DSTRBYR1 > 1960) %>%
   group_by(PLOT_FIADB) %>%
-  filter(!any(DSTRBYR1 < 1960) && n_FIAfires == 2) %>%
-  mutate(match = DSTRBYR1 %in% c(PerimFireYear, PerimFireYear - 1, PerimFireYear + 1, PerimFireYear - 2, PerimFireYear + 2),
+  mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
+  filter(n_FIAfires >= 2) %>%
+  mutate(match = DSTRBYR1 %in% PerimFireYear,
          n = n_distinct(match)) %>%
   mutate(DstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear)) %>%
   ungroup()
-  
 
+length(unique(joined_dat$PLOT_FIADB))
 length(unique(rcnt_jnd_dat$PLOT_FIADB))
 
 ```
+
+#### Build a helper function to assign observations to "keep" vs. "check" lists
+
+```{r}
+
+plts2kp <- c()
+plts2chk <- c()
+
+assignPlots <- function(df) {
+  
+  keepPlts <- df %>%
+    filter(keep == "keep") %>%
+    pull(PLOT_FIADB) %>%
+    unique() 
+  
+  chkPlts <- df %>%
+    filter(keep == "check") %>%
+    pull(PLOT_FIADB) %>%
+    unique() 
+  
+  plts2kp <<- c(plts2kp, keepPlts)
+  plts2chk <<- c(plts2chk, chkPlts)
+
+  
+}
+
+```
+
+
+### Confirmed plots table
 
 ```{r}
 
 confirmed <- rcnt_jnd_dat %>%
   filter(match == TRUE, n == 1) %>%
-  mutate(DSTRBYR1 = ifelse(DstncBtwnFireYrs <= 2, PerimFireYear, DSTRBYR1)) %>%
   group_by(PLOT_FIADB) %>%
   mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
   ungroup() %>%
-  filter(match == TRUE, n == 1, n_FIAfires == 2)
+  filter(match == TRUE, n == 1, n_FIAfires == 2) %>%
+  mutate(keep = "keep")
+
+length(unique(confirmed$PLOT_FIADB))
+
+assignPlots(confirmed)
+
+```
+
+### Partly confirmed plots table
+
+```{r}
 
 prtly_cnfrmd <- rcnt_jnd_dat %>%
   filter(n == 2) %>%
-  mutate(DSTRBYR1 = ifelse(DstncBtwnFireYrs <= 2, PerimFireYear, DSTRBYR1)) %>%
   group_by(PLOT_FIADB) %>%
   mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
+  ungroup()
+
+length(unique(prtly_cnfrmd$PLOT_FIADB))
+
+# Rule 1, if there are two burn years and the distance between them is less than
+# or equal to 5 years, move to the "to check" category
+
+prtly_p1 <- prtly_cnfrmd %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_invyr = n_distinct(INVYR),
+         n_brnyr = n_distinct(DSTRBYR1),
+         dstnc_brnyrs = abs(max(DSTRBYR1) - min(DSTRBYR1)),
+         keep = ifelse(n_brnyr == 2 & dstnc_brnyrs <= 5, "check", NA)) %>%
+  ungroup()
+
+assignPlots(prtly_p1)
+
+# Rule 2, if the plot has multiple INVYRs, and the historical fire
+# disturbance is confirmed in the second visit, keep the plots
+
+prtly_p2 <- prtly_p1 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB, Source) %>%
+  mutate(n_src = ifelse(Source == "HIST_DISTURB", n_distinct(Source), NA),
+         n_brnyr = n_distinct(DSTRBYR1),
+         n_invyr = n_distinct(INVYR)) %>%
+  mutate(keep = ifelse(n_invyr == 2 & n_src == 1 & n_brnyr == 1, "keep", NA)) %>%
   ungroup() %>%
-  filter(n == 2)
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse("keep" %in% keep, "keep", NA)) %>%
+  ungroup()
+
+assignPlots(prtly_p2)
+
+# Rule 3, if the plot was visited twice, there were two burns, and second burn
+# occurred between the two visits, keep the plot
+# Note: plot 61673 has a brnyr after its initial inventory, which was due to a
+# measure year that occurred after the invyr
+
+prtly_p3 <- prtly_p2 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_invyr = n_distinct(INVYR),
+         n_brnyr = n_distinct(DSTRBYR1),
+         keep = ifelse(n_invyr == 2 & n_brnyr == 2 & max(DSTRBYR1) <= max(INVYR) & max(DSTRBYR1) >= min(INVYR), "keep", NA)) 
+
+assignPlots(prtly_p3)
+
+# Rule 4, clear out the 9999 values
+
+prtly_p4 <- prtly_p3 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(9999 %in% DSTRBYR1, "check", NA))
+
+assignPlots(prtly_p4)
+
+# Rule 5, if a plot has a single inventory year associated with it but multiple
+# burn years that are more than 5 years apart, keep the plot given that the 
+# multiple dates are unlikely to point to the same event.
+
+prtly_p5 <- prtly_p4 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB, INVYR) %>%
+  mutate(nBrnyrsByVisit = n_distinct(DSTRBYR1),
+         dstncBtwnBrnYrs = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
+  ungroup() %>%
+  mutate(keep = ifelse(n_invyr == 1 & n_brnyr == 2, "keep", NA))
+
+assignPlots(prtly_p5)
+
+# Rule 6, check remaining plots with 3 burns
+
+prtly_p6 <- prtly_p5 %>%
+  filter(is.na(keep)) %>%
+  mutate(keep = ifelse(n_brnyr == 3, "check", NA))
+
+assignPlots(prtly_p6)
+
+# Rule 7, if a plot has three inventory years and the 2nd and third inventory years
+# report the same disturbance date that falls between visit 1 and visit 2, keep
+# the plots
+# e.g., inventories in 2001, 2004, and 2014 with disturbance dates of 1990, 2003 & 2003
+
+prtly_p7 <- prtly_p6 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(max(DSTRBYR1) < median(INVYR) & max(DSTRBYR1) > min(INVYR), "keep", NA))
+  
+assignPlots(prtly_p7)
+
+# Rule 8, If a plot has three inventories and the first and second inventory 
+# both point to one burn whereas the third inventory points to a second 
+# burn that is in between visit 2 and visit 3, keep the plot (Similar logic
+# to rule 7, but other "direction")
+
+prtly_p8 <- prtly_p7 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(n_brnyr == 2 & max(DSTRBYR1) > median(INVYR), "keep", NA))
+  
+assignPlots(prtly_p8)
+
+# Rule 9, remaining plots are a bit haphazard, a fair number with >3 inventories, 
+# in looking at them, plot 68034 looks okay - move others to the check category
+
+prtly_p9 <- prtly_p8 %>%
+  filter(is.na(keep)) %>%
+  mutate(keep = ifelse(PLOT_FIADB == 68034, "keep", "check")) %>%
+  arrange(PLOT_FIADB, INVYR)
+
+assignPlots(prtly_p9)
+
+
+#------
+
+length(plts2chk)
+length(unique(plts2chk))
+
+length(plts2kp)
+length(unique(plts2kp))
+
+```
+
+
+### Unconfirmed plots table
+
+Handling the unconfirmed data
+
+```{r}
 
 uncnfrmd <- rcnt_jnd_dat %>%
   filter(match == FALSE, n == 1)
 
-length(unique(confirmed$PLOT_FIADB))
-length(unique(prtly_cnfrmd$PLOT_FIADB))
 length(unique(uncnfrmd$PLOT_FIADB))
 
+
+uncnfrmd2cln <- uncnfrmd %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_invyr = n_distinct(INVYR),
+         n_brnyr = n_distinct(DSTRBYR1),
+         n_src = n_distinct(Source),
+         dstnc_brnyrs = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
+  ungroup()
+
+
+# Rule 1, If 9999 (missing data) is in the fire disturbance year column,
+# assign the plot number to the "check" list
+
+uncnfrmd_p1 <- uncnfrmd2cln %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(9999 %in% DSTRBYR1, "check", NA)) %>%
+  ungroup()
+  
+assignPlots(uncnfrmd_p1)
+
+# Rule 2, if only one INVYR and multiple fire disturbances are recorded, keep
+# under the assumption that those measuring had the correct information and
+# would not create errors of commission.
+
+uncnfrmd_p2 <- uncnfrmd_p1 %>%
+  filter(is.na(keep)) %>%
+   mutate(keep = ifelse(n_invyr == 1 & n_brnyr == 2, "keep", NA))
+
+assignPlots(uncnfrmd_p2)
+
+# Rule 3, if the distance between the fire disturbances is less than 5 years,
+# place the plot in the "to check" list.
+
+uncnfrmd_p3 <- uncnfrmd_p2 %>%
+  filter(is.na(keep)) %>%
+  mutate(keep = ifelse(dstnc_brnyrs <= 5, "check", NA))
+
+assignPlots(uncnfrmd_p3)
+
+# Rule 4, if the plot has multiple INVYRs, and the historical fire
+# disturbance is confirmed in the second visit, keep the plots
+
+uncnfrmd_p4 <- uncnfrmd_p3 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB, Source) %>%
+  mutate(n_src = ifelse(Source == "HIST_DISTURB", n_distinct(Source), NA),
+         n_brnyr = n_distinct(DSTRBYR1),
+         n_invyr = n_distinct(INVYR)) %>%
+  mutate(keep = ifelse(n_invyr == 2 & n_src == 1 & n_brnyr == 1, "keep", NA)) %>%
+  ungroup() %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse("keep" %in% keep, "keep", NA)) %>%
+  ungroup()
+
+assignPlots(uncnfrmd_p4)
+
+# Rule 5, If a plot was visted twice, and the second visit records only a burn
+# between the first and second visit (but not historical burn), keep the plot
+# under the assumption that the more recent fire took precedence over the
+# (valid) historical fire
+
+uncnfrmd_p5 <- uncnfrmd_p4 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_invyr = n_distinct(INVYR),
+         n_brnyr = n_distinct(DSTRBYR1),
+         keep = ifelse(n_invyr == 2 & max(DSTRBYR1) <= max(INVYR) & max(DSTRBYR1) >= min(INVYR), "keep", NA)) %>%
+  ungroup()
+
+assignPlots(uncnfrmd_p5)
+
+# Rule 6, for plots with 2 visits & 2 burn years, but both burn years are 
+# before the first inventory, move the plots to the "check" dataframe
+# e.g., visited in 2002 and 2006 with 2002 reporting brn yr of 1970 and 
+# 2006 reporting brn yr of 1960
+
+uncnfrmd_p6 <- uncnfrmd_p5 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(n_invyr == 2 & n_brnyr == 2 & max(DSTRBYR1) < min(INVYR) & max(DSTRBYR1) != min(DSTRBYR1), "check", NA))
+
+assignPlots(uncnfrmd_p6)
+
+# Rule 7, remaining plots are a bit haphazard, manually sort through them saving
+# four plots and assigning the rest to the "check" category
+
+uncnfrmd_p7 <- uncnfrmd_p6 %>%
+  filter(is.na(keep)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(keep = ifelse(PLOT_FIADB %in% c(68381, 68385, 55140, 77768), "keep", "check")) %>%
+  arrange(PLOT_FIADB, INVYR)
+
+assignPlots(uncnfrmd_p7)
+
+# View final results
+
+length(plts2kp)
+length(unique(plts2kp))
+
+length(plts2chk)
+length(unique(plts2chk))
+
 ```
 
-Logical structure for inclusion/exlcusion of the various plots
-
-Confirmed: Keep all confirmed plots!
-Partly confirmed:
-  If more than one 
-  
 ```{r}
 
-pass1 <- prtly_cnfrmd %>%
-  mutate(keep = match)
-  
-p1 <- pass1 %>%
-  group_by(PLOT_FIADB) %>%
-  mutate(n_keep = n_distinct(keep)) %>%
-  ungroup() %>%
-  filter(keep == TRUE, n_keep == 1) %>%
-  select(colnames(confirmed))
-  
-test <- add_row(confirmed, p1)
-
-p2 <- pass1 %>%
-  filter(!(PLOT_FIADB %in% p1$PLOT_FIADB))
-  # Rule ii.
-  group_by(PLOT_FIADB, DSTRBYR1) %>%
-  mutate(dstnct_invyr = ifelse(keep == FALSE, n_distinct(INVYR), 0)) %>%
-  mutate(keep = ifelse(dstnct_invyr >= 2, TRUE, keep)) %>%
-  ungroup() %>%
-  # Rule iii.
-  group_by(PLOT_FIADB) %>%
-  mutate(yr_dscrpncy = abs(DSTRBYR1  - PerimFireYear),
-         ruleIII = ifelse(TimeBtwnFires < 2, TRUE, FALSE))
-
-
-
-cln_prtly_cnfrmd %>%
-  View()
-
-```
-
-
-### Plotting some of the numbers
-
-```{r}
-
-plt_dat <- q2 %>%
-  filter(TimeBtwnFires <= 252)
-  
-plt_dat %>%
-  select(PLOT_FIADB, TimeBtwnFires) %>%
-  distinct() %>%
-  pull(TimeBtwnFires) %>%
-  hist(breaks = seq(0, 260, 10),
-       main = "Histogram of time between fires for distinct plots")
+write_csv(plts2chk)
+write_csv(plts2kp)
 
 ```
