@@ -416,7 +416,11 @@ length(unique(plts2chk))
 
 ```{r}
 
-write_csv(plts2chk)
-write_csv(plts2kp)
+df <- tibble(PLOT_FIADB = sort(plts2kp), status = "confirmed") %>%
+  bind_rows(tibble(PLOT_FIADB = sort(plts2chk), status = "needToCheck"))
+
+View(df)
+
+write_csv(df, "../data/plts2chkForJeremy.csv")
 
 ```
