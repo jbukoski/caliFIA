@@ -87,36 +87,46 @@ Columns:
 
 ```{r}
 
-intrsct_dat <- read_excel("../data/FireOverlay2.xlsx") %>%
+perimDat <- read_excel("../data/FireOverlay2.xlsx") %>%
   arrange(plot_fiadb, FireYear) %>%
   rename(PerimFireYear = FireYear)
+
+fersDat <- read_csv("../data/CA_FERS.csv")
+
 
 ```
 
 ```{r}
 
 joined_dat <- q2 %>%
-  left_join(intrsct_dat, by = c("PLOT_FIADB" = "plot_fiadb"), keep = T) %>%
-  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, TimeBtwnFires, PerimFireYear) %>%
+  left_join(perimDat, by = c("PLOT_FIADB" = "plot_fiadb"), keep = T) %>%
+  left_join(fersDat, by = c("PLOT_FIADB")) %>%
+  rename(fersFireYr = FIRE_YEAR) %>%
+  filter(DSTRBYR1 >= 1960) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, PerimFireYear, fersFireYr, TimeBtwnFires) %>%
   group_by(PLOT_FIADB) %>%
   mutate(match = DSTRBYR1 %in% PerimFireYear,
-         n = n_distinct(match),
          n_FIAfires = n_distinct(DSTRBYR1),
-         nPerimFires = n_distinct(PerimFireYear)) %>%
-  ungroup()
-
-rcnt_jnd_dat <- joined_dat %>%
-  filter(DSTRBYR1 > 1960) %>%
+         n_PerimFires = n_distinct(PerimFireYear),
+         n_fersFires = n_distinct(fersFireYr)) %>%
+  ungroup() %>%
+  filter(n_FIAfires >= 2)
+  
+rcntJndDat <- joined_dat %>%
   group_by(PLOT_FIADB) %>%
   mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
   filter(n_FIAfires >= 2) %>%
   mutate(match = DSTRBYR1 %in% PerimFireYear,
-         n = n_distinct(match)) %>%
-  mutate(DstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear)) %>%
-  ungroup()
+         n = n_distinct(match),
+         dstncBtwnFireYrs = abs(DSTRBYR1 - PerimFireYear),
+         n_FIAfires = n_distinct(DSTRBYR1)) %>%
+  ungroup() %>%
+  filter(n_FIAfires >= 2)
 
 length(unique(joined_dat$PLOT_FIADB))
-length(unique(rcnt_jnd_dat$PLOT_FIADB))
+length(unique(rcntJndDat$PLOT_FIADB))
+
+dat2process <- rcntJndDat
 
 ```
 
@@ -152,7 +162,7 @@ assignPlots <- function(df) {
 
 ```{r}
 
-confirmed <- rcnt_jnd_dat %>%
+confirmed <- dat2process %>%
   filter(match == TRUE, n == 1) %>%
   group_by(PLOT_FIADB) %>%
   mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
@@ -170,7 +180,7 @@ assignPlots(confirmed)
 
 ```{r}
 
-prtly_cnfrmd <- rcnt_jnd_dat %>%
+prtly_cnfrmd <- dat2process %>%
   filter(n == 2) %>%
   group_by(PLOT_FIADB) %>%
   mutate(n_FIAfires = n_distinct(DSTRBYR1)) %>%
@@ -290,11 +300,11 @@ assignPlots(prtly_p9)
 
 #------
 
-length(plts2chk)
-length(unique(plts2chk))
-
 length(plts2kp)
 length(unique(plts2kp))
+
+length(plts2chk)
+length(unique(plts2chk))
 
 ```
 
@@ -305,7 +315,7 @@ Handling the unconfirmed data
 
 ```{r}
 
-uncnfrmd <- rcnt_jnd_dat %>%
+uncnfrmd <- dat2process %>%
   filter(match == FALSE, n == 1)
 
 length(unique(uncnfrmd$PLOT_FIADB))
@@ -366,7 +376,7 @@ uncnfrmd_p4 <- uncnfrmd_p3 %>%
 
 assignPlots(uncnfrmd_p4)
 
-# Rule 5, If a plot was visted twice, and the second visit records only a burn
+# Rule 5, If a plot was visited twice, and the second visit records only a burn
 # between the first and second visit (but not historical burn), keep the plot
 # under the assumption that the more recent fire took precedence over the
 # (valid) historical fire

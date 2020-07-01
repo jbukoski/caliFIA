@@ -1,0 +1,275 @@
+---
+title: "parseFireYears.Rmd"
+author: "Jacob Bukoski"
+date: "6/30/2020"
+output: html_document
+---
+
+#### Load libraries and datasets
+
+```{r}
+
+library(readxl)
+library(RSQLite)
+library(tidyverse)
+
+filename <- "../data/TeamPotts1.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+dbListTables(db)
+
+db_COND_LB <- dbReadTable(db, "COND_LVL_LOOK_BACKS_PNW")
+db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
+
+# Combine above two tables
+
+all_dat <- db_PLOT_LB %>%
+  left_join(db_COND_LB)
+
+# Load in the perimeter data and the FERS CA plots
+
+perimDat <- read_excel("../data/FireOverlay2.xlsx") %>%
+  arrange(plot_fiadb, FireYear) %>%
+  rename(PerimFireYear = FireYear)
+
+fersDat <- read_csv("../data/CA_FERS.csv")
+
+```
+
+```{r}
+
+q1 <- all_dat %>%
+  filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
+  select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, ForestAtLastPostDistVisit) %>%
+  group_by(PLOT_FIADB) %>%    # Group by additional criteria to better identify unique plots, some plots have 
+  #mutate(n = n()) %>%
+  mutate(n = n_distinct(DSTRBYR1)) %>%
+  filter(n >= 2) %>%
+  arrange(PLOT_FIADB, DSTRBYR1, INVYR)
+
+length(unique(q1$PLOT_FIADB))
+
+q2 <- q1 %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n2 = n_distinct(interaction(PLOT_FIADB, DSTRBYR1))) %>%
+  filter(n2 >= 2) %>%
+  select(-ForestAtLastPostDistVisit, -n)
+
+```
+
+```{r}
+
+jndData <- q2 %>%
+  left_join(perimDat, by = c("PLOT_FIADB" = "plot_fiadb")) %>%
+  left_join(fersDat, by = "PLOT_FIADB") %>%
+  rename(fersFireYr = FIRE_YEAR) %>%
+  filter(DSTRBYR1 >= 1960) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, PerimFireYear, fersFireYr) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_FIAfires = n_distinct(DSTRBYR1),
+         n_perimFires = n_distinct(PerimFireYear),
+         n_ferFiresYr = n_distinct(fersFireYr)) %>%
+  filter(n_FIAfires >= 2) %>%
+  mutate(match = DSTRBYR1 %in% PerimFireYear | DSTRBYR1 %in% fersFireYr,
+         n_match = n_distinct(match)) %>%
+  ungroup()
+
+dat2process <- jndData
+
+n_distinct(dat2process$PLOT_FIADB)
+
+pltsThatFlippedToSingle <- c()
+
+```
+
+```{r}
+
+# Plots with exact match to perimeter fire year or FERS fire year (n = 29)
+
+confirmed <- dat2process %>%
+  filter(match == TRUE, n_match == 1, n_FIAfires == 2) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1) %>%
+  mutate(df = "cnfrmd", 
+         rule = "both years confirmed by fire perimeter years",
+         fireYrSrc = "FIADB") %>%
+  distinct()
+
+write_csv(confirmed, "~/Desktop/confirmed_plots.csv")
+
+adjList <- confirmed
+
+n_distinct(confirmed$PLOT_FIADB)
+
+```
+
+```{r}
+
+prtly_cnfrmd <- dat2process %>%
+  filter(n_match == 2)
+
+length(unique(prtly_cnfrmd$PLOT_FIADB))
+
+#---
+
+# Rule 1, for plots with 2 FIA fire, 1 perimeter fire year, and the most recent burn
+# was confirmed by the perimeter fire year, keep the plot FIA years as long as the
+# distance between the fire years is greater than 5 years. (n = 65)
+
+prtly_p1 <- prtly_cnfrmd %>%
+  group_by(PLOT_FIADB) %>%
+  filter(n_FIAfires == 2 & n_perimFires == 1 & 
+           (max(DSTRBYR1) %in% PerimFireYear | max(DSTRBYR1) %in% fersFireYr) & 
+           (!(min(DSTRBYR1) %in% PerimFireYear) | !(min(DSTRBYR1 %in% fersFireYr)))) %>%
+  mutate(dstncBtwnFires1 = abs(DSTRBYR1 - PerimFireYear),
+         dstncBtwnFires2 = abs(DSTRBYR1 - fersFireYr)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(dstncBtwnFires = max(dstncBtwnFires1, dstncBtwnFires2, na.rm = T)) %>%
+  select(-dstncBtwnFires1, -dstncBtwnFires2) %>%
+  ungroup() %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_visit = as.numeric(factor(INVYR)),
+         keep = match,
+         keep = ifelse(match == FALSE & dstncBtwnFires > 5, TRUE, keep),
+         n_keep = n_distinct(keep)) %>%
+  ungroup()
+
+prtly_list1 <- prtly_p1 %>%
+  filter(keep == TRUE & n_keep == 1) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 1",
+         fireYrSrc = "FIADB")
+
+confirmed <- add_row(confirmed, prtly_list1)
+
+# Rule 2, for plots with two inventories and two disturbance years, but the burn
+# years are less than 5 years apart and the second burn year is both (a)
+# unconfirmed and (b) precedes the second burn year, adjust the second burn
+# year to the confirmed fire perimeter burn year.
+# Will shift plots to "single burn" category.
+
+
+prtly_p2 <- prtly_p1 %>%
+  filter(n_keep == 2) %>%
+  arrange(PLOT_FIADB, INVYR) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_records = n(),
+         keep = ifelse(n_records == 2 & DSTRBYR1 == min(DSTRBYR1) & n_visit == 2, "FERS", "FIADB"),
+         DSTRBYR1 = ifelse(keep == "FERS", fersFireYr, DSTRBYR1)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_fires = n_distinct(DSTRBYR1))
+
+prtly_list2 <- prtly_p2 %>%
+  filter(n_fires == 2) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, keep) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 2") %>%
+  rename(fireYrSrc = keep)
+
+confirmed <- add_row(confirmed, prtly_list2)
+
+# Move other plots to single list (NEED TO REVISIT THESE)
+
+pltsThatFlippedToSingle <- prtly_p2 %>%
+  filter(n_fires == 1) %>%
+  pull(PLOT_FIADB) %>%
+  unique() %>%
+  c(pltsThatFlippedToSingle)
+
+# Rule 3, for plots that have 2 FIA fire years, 2 perimeter fire years, the more
+# recent burn confirmed by a fire perimieter year, and the historical burn before
+# 1980, assign the oldest perimeter burn year to the historical fire year slot.
+
+prtly_p3 <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  filter(n_FIAfires == 2 & n_perimFires == 2) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(dstnc_minFireYr = abs(min(DSTRBYR1) - min(PerimFireYear))) %>%
+  filter((min(DSTRBYR1) < 1990) & (max(DSTRBYR1) == max(PerimFireYear) & (min(DSTRBYR1) != min(PerimFireYear))) ) %>%
+  mutate(fireYrSrc = ifelse(match == TRUE, "FIADB", "PERIM"),
+         DSTRBYR1 = ifelse(match == TRUE, DSTRBYR1, min(PerimFireYear))) %>%
+  ungroup()
+
+prtly_list3 <- prtly_p3 %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, fireYrSrc) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 3")
+
+confirmed <- add_row(confirmed, prtly_list3)  
+
+# Rule 4, for plots with 2 inventory years, 2 FIA fire years, 2 Perimeter 
+# Fire Years and the difference between the oldest FIA fire and oldest Perim
+# Fire year <= 10 years, substitute min(PerimFireYear) for min(DSTRBYR1)
+
+prtly_p4 <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  group_by(PLOT_FIADB) %>%
+  filter(!any(DSTRBYR1 == 9999)) %>%
+  mutate(n_invyr = n_distinct(INVYR)) %>%
+  filter(n_invyr == 2 & n_FIAfires == 2 & n_perimFires == 2) %>%
+  mutate(dstncBtwnMinFireYrs = abs(min(DSTRBYR1) - min(PerimFireYear))) %>%
+  filter(dstncBtwnMinFireYrs < 10 & any(match == FALSE & DSTRBYR1 == min(DSTRBYR1))) %>% 
+  mutate(fireYrSrc = ifelse(match == FALSE, "PERIM", "FIADB"),
+         DSTRBYR1 = ifelse(fireYrSrc == "PERIM", min(PerimFireYear), DSTRBYR1))
+
+prtly_list4 <- prtly_p4 %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, fireYrSrc) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 4")
+
+confirmed <- add_row(confirmed, prtly_list4)
+
+# Rule 5, 
+
+prtly_p5 <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  filter(n_FIAfires == 2) %>%
+  group_by(PLOT_FIADB) %>%
+  filter(!any(DSTRBYR1 == 9999)) %>%
+  filter(any(match == FALSE & (DSTRBYR1 == max(DSTRBYR1)) & !(max(DSTRBYR1) %in% PerimFireYear)) ) %>%  
+  filter(n_perimFires == 1) %>%
+  mutate(dstncBtwnBrns = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
+  select(-n_match) %>%
+  arrange(PLOT_FIADB, INVYR)
+
+
+write_csv(prtly_p5, "~/Desktop/data_chunk.csv")
+
+
+test <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  filter(n_perimFires == 1) %>%
+  arrange(PLOT_FIADB, INVYR) %>%
+  select(-match, -n_match) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(dstncBtwnBrns = abs(max(DSTRBYR1) - min(DSTRBYR1)))
+
+# Search for fires with more than one perimeter burn
+
+test2 <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  filter(n_perimFires > 1)
+
+
+
+n_distinct(test$PLOT_FIADB)
+ 
+View(prtly_p5)
+
+```
+
+```{r}
+
+
+uncnfrmd <- dat2process %>%
+  filter(match == FALSE, n_match == 1)
+
+length(unique(uncnfrmd$PLOT_FIADB))
+
+```
