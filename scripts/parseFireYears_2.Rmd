@@ -225,36 +225,44 @@ prtly_list4 <- prtly_p4 %>%
 
 confirmed <- add_row(confirmed, prtly_list4)
 
-# Rule 5, 
+# Rule 5, fire plots with 2 FIA fires and 2 or more perimeter fire years, calculate
+# the minimum distance between the FIA fires and perimeter fire year candidates and
+# keep FIADB burn yr if exact match, otherwise substitute Perimeter fire year
 
 prtly_p5 <- prtly_cnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
-  filter(n_FIAfires == 2) %>%
+  filter(n_FIAfires == 2 & n_perimFires >= 2) %>%
   group_by(PLOT_FIADB) %>%
   filter(!any(DSTRBYR1 == 9999)) %>%
-  filter(any(match == FALSE & (DSTRBYR1 == max(DSTRBYR1)) & !(max(DSTRBYR1) %in% PerimFireYear)) ) %>%  
-  filter(n_perimFires == 1) %>%
-  mutate(dstncBtwnBrns = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
-  select(-n_match) %>%
-  arrange(PLOT_FIADB, INVYR)
-
-
-write_csv(prtly_p5, "~/Desktop/data_chunk.csv")
-
-
-test <- prtly_cnfrmd %>%
-  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
-  filter(n_perimFires == 1) %>%
-  arrange(PLOT_FIADB, INVYR) %>%
-  select(-match, -n_match) %>%
+  group_by(PLOT_FIADB, INVYR, CONDID, DSTRBCD1, DSTRBYR1) %>%
+  mutate(diff = abs(DSTRBYR1 - PerimFireYear)) %>%
+  filter(diff == min(diff)) %>%
   group_by(PLOT_FIADB) %>%
-  mutate(dstncBtwnBrns = abs(max(DSTRBYR1) - min(DSTRBYR1)))
+  mutate(n_perimFires = n_distinct(PerimFireYear)) %>%
+  filter(!any(diff >= 10) & min(DSTRBYR1) <= 2000 & n_perimFires == 2) %>%
+  mutate(fireYrSrc = ifelse(DSTRBYR1 == PerimFireYear, "FIADB", "PERIM"),
+         DSTRBYR1 = ifelse(fireYrSrc == "PERIM", PerimFireYear, DSTRBYR1))
 
-# Search for fires with more than one perimeter burn
+prtly_list5 <- prtly_p5 %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, fireYrSrc) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 5")
 
-test2 <- prtly_cnfrmd %>%
+confirmed <- add_row(confirmed, prtly_list5)
+
+# Rule 6, 
+
+prtly_p6 <- prtly_cnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
   filter(n_perimFires > 1)
+
+
+# How to handle fires with just one burn?
+
+singlePerim <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  filter(n_perimFires == 1)
 
 
 
