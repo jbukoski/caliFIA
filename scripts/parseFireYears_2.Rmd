@@ -314,12 +314,12 @@ confirmed <- add_row(confirmed, prtly_list6)
 prtly_p7 <- prtly_cnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
   group_by(PLOT_FIADB) %>%
-  filter(n_perimFires == 2 & n_FIAfires == 2) %>%
+  filter(n_perimFires == 2 & n_FIAfires == 3) %>%
   mutate(diff = abs(min(DSTRBYR1) - min(PerimFireYear))) %>%
   filter(any(match == FALSE & Source == "HIST_DISTURB"))
 
 
-#View(prtly_p7)
+View(prtly_p7)
 
 # How to handle fires with just one burn?
 
@@ -332,27 +332,66 @@ singlePerim <- prtly_cnfrmd %>%
 
 ```{r}
 
-cntyCds <- read_csv("../data/ca_cnty_cds.csv")
 
-confirmed %>%
-  group_by(OWNCD, SWHW) %>%
-  summarize( n = n_distinct(PLOT_FIADB)) 
+uncnfrmd <- dat2process %>%
+  filter(match == FALSE, n_match == 1) 
+
+length(unique(uncnfrmd$PLOT_FIADB))
+
+# Rule 1, If plots have two fia fire yaers, two perimeter fire years, the
+# max of the perimeter fire year is not greater than the max of the inventory
+# year, and the years do not match exactly, substitute the perimeter fire years
+# for the FIA fire years.
+
+un_p1 <- uncnfrmd %>%
+  filter(n_FIAfires == 2 & n_perimFires == 2) %>%
+  group_by(PLOT_FIADB) %>%
+  filter(max(PerimFireYear) <= max(INVYR)) %>%
+  mutate(max_diff = abs(max(PerimFireYear) - max(DSTRBYR1)),
+         min_diff = abs(min(PerimFireYear) - min(DSTRBYR1))) %>%
+  mutate(fireYrSrc = "PERIM") %>%
+  mutate(DSTRBYR1 = ifelse(DSTRBYR1 == max(DSTRBYR1), max(PerimFireYear), min(PerimFireYear)))
+
+un_l1 <- un_p1 %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, fireYrSrc, OWNCD, FORTYPCD, SWHW, COUNTYCD) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 6")
+
+confirmed <- add_row(confirmed, un_l1)
+
+# Rule 2,
+
+un_p2 <- uncnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(diffBtwnFires = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
+  filter(SWHW == "1_Softwoods")
 
 
-confirmed %>%
-  left_join(cntyCds, by = c("COUNTYCD")) %>%
-  group_by(CNTY_NAME, OWNCD, SWHW) %>%
-  summarize(n = n_distinct(PLOT_FIADB))
+View(un_p2)
+
 
 
 ```
 
+
+### Summary statistics of the confirmed plot data
+
 ```{r}
 
+cntyCds <- read_csv("../data/ca_cnty_cds.csv")
 
-uncnfrmd <- dat2process %>%
-  filter(match == FALSE, n_match == 1)
+confirmed %>%
+  group_by(OWNCD, SWHW) %>%
+  summarize( n = n_distinct(PLOT_FIADB)) %>%
+  View
 
-length(unique(uncnfrmd$PLOT_FIADB))
+confirmed %>%
+  left_join(cntyCds, by = c("COUNTYCD")) %>%
+  group_by(CNTY_NAME, OWNCD, SWHW) %>%
+  summarize(n = n_distinct(PLOT_FIADB)) %>%
+  arrange(SWHW, -n) %>%
+  View
 
 ```
