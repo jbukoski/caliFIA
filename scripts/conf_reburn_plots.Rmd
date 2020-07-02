@@ -1,0 +1,108 @@
+---
+title: "conf_reburn_plots"
+author: "Evan Patrick"
+date: "7/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document takes data from the Forest Inventory Analysis Database (FIADB) in California (Region 5) that has burned multiple times from 1960 to 2018. The goal is to understand important aspects of the plots, such as forest type and ownership. Data is the PNW_FIADB downloaded as SQLite.
+
+
+```{r}
+
+library(rFIA)
+library(RSQLite)
+library(tidyverse)
+
+# Set working dir
+#setwd("~/Summer 2020/FIA/rFIA")
+
+```
+
+Load both the database and the list of reburn plots
+
+```{r}
+# Get filename of db and read into SQLite 
+filename <- "../data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+#dbListTables(db)
+
+pnwFIADBcond <- dbReadTable(db, "COND")
+ForTypRef <- dbReadTable(db, "REF_FOREST_TYPE") %>% 
+  rename(FORTYPCD = REF_FORTYPCD)
+
+OWNGRPCDref <- matrix(c(11, "National Forest.", 
+                        12, "National Grassland and/or Prairie.", 
+                        13, "Other Forest Service Land.", 
+                        21, "National Park Service.", 
+                        22, "Bureau of Land Management.", 
+                        23, "Fish and Wildlife Service.", 
+                        24, "Departments of Defense/Energy.", 
+                        25, "Other Federal.", 
+                        31, "State including State public universities.", 
+                        32, "Local (County, Municipality, etc.) including water authorities.", 
+                        33, "Other non-federal public.", 
+                        46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% 
+  as.data.frame() %>% 
+  rename( "OWNCD" = "V1", "Description" = "V2") 
+
+OWNGRPCDref$OWNCD <- as.numeric(as.character(OWNGRPCDref$OWNCD))
+
+```
+
+Forest Type and Ownership class both in COND table
+FORTYPCD - forest type
+OWNCD - ownership class
+
+Load list of reburn plots and join with COND table
+
+```{r}
+
+# confirmed_reburn_plots <- read.csv("./data/confirmed_plots.csv") %>% 
+#   rename(PLOT = PLOT_FIADB)
+reburn_join <- confirmed %>% 
+  rename(PLOT = PLOT_FIADB) %>%
+  left_join(pnwFIADBcond, by = "PLOT")
+
+reburn_join <- reburn_join %>% 
+  select(PLOT:fireYrSrc,FORTYPCD, OWNCD)
+
+# every other FORTYPCD is NA, probably some artifact of the join
+reburn_join_filt <- reburn_join %>% 
+  filter(!is.na(FORTYPCD)) %>% 
+  left_join(ForTypRef, by = "FORTYPCD") %>% 
+  select(PLOT:MEANING) %>%
+  left_join(OWNGRPCDref, by = "OWNCD") %>% 
+  distinct(PLOT, INVYR.x, DSTRBCD1.x, CONDID.x, SOURCE, DSTRBYR1.x, .keep_all = TRUE)
+
+# two of the initial plots are missing - which ones? 
+missed_plots <- confirmed %>%
+  rename(PLOT = PLOT_FIADB) %>% 
+  anti_join(reburn_join_filt, by = "PLOT")
+
+# download as csv 
+write.csv(reburn_join_filt,"./data/confirmed_plots_join.csv", row.names = TRUE)
+write.csv(missed_plots, "./data/missed_reburn_plots.csv", row.names = TRUE)
+
+```
+
+```{r}
+
+length(unique(confirmed$PLOT_FIADB))
+
+length(unique(missed_plots$PLOT))
+length(unique(reburn_join_filt$PLOT))
+
+reburn_join_filt %>%
+  select(PLOT, FORTYPCD, OWNCD, SWHW, VALUE, MEANING, Description) %>%
+  group_by(OWNCD, SWHW) %>%
+  summarize(n = n_distinct(PLOT))
+
+```
+
