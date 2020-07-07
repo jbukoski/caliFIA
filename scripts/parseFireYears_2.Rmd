@@ -12,7 +12,7 @@ output: html_document
 library(readxl)
 library(RSQLite)
 library(tidyverse)
-
+  
 filename <- "../data/TeamPotts1.db"
 sqlite.driver <- dbDriver("SQLite")
 db <- dbConnect(sqlite.driver, dbname = filename)
@@ -313,11 +313,13 @@ confirmed <- add_row(confirmed, prtly_list6)
 
 prtly_p7 <- prtly_cnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
-  group_by(PLOT_FIADB) %>%
-  filter(n_perimFires == 2 & n_FIAfires == 3) %>%
-  mutate(diff = abs(min(DSTRBYR1) - min(PerimFireYear))) %>%
-  filter(any(match == FALSE & Source == "HIST_DISTURB"))
+  filter(COUNTYCD %in% c(93, 105))
 
+prtly_p7 %>%
+  group_by(SWHW) %>%
+  summarise( n = n_distinct(PLOT_FIADB))
+
+# 
 
 View(prtly_p7)
 
@@ -366,12 +368,15 @@ un_p2 <- uncnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
   group_by(PLOT_FIADB) %>%
   mutate(diffBtwnFires = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
-  filter(SWHW == "1_Softwoods")
+  filter(COUNTYCD %in% c(93, 105))
 
 
 View(un_p2)
 
+un_p2 %>% group_by(SWHW) %>% summarise(n = n_distinct(PLOT_FIADB))
 
+# 12 more softwood plots and 5 more hardwood plots in the unconfirmed dataset - could use plot cards or
+# other checks to make judgement calls on whether they should be included.
 
 ```
 
@@ -395,3 +400,44 @@ confirmed %>%
   View
 
 ```
+
+
+```{r}
+
+confirmed %>%
+  filter(COUNTYCD %in% c(93, 105)) %>%
+  select(PLOT_FIADB, INVYR, DSTRBYR1, SWHW) %>%
+  mutate(PLOT_FIADB = as.factor(PLOT_FIADB)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(diff = max(DSTRBYR1) - min(DSTRBYR1)) %>%
+  distinct() %>%
+  ungroup() %>%
+  arrange(PLOT_FIADB, DSTRBYR1) %>%
+  ggplot() +
+  geom_point(aes(y = reorder(PLOT_FIADB, DSTRBYR1), x = DSTRBYR1, col = SWHW)) +
+  #geom_point(aes(y = reorder(PLOT_FIADB, DSTRBYR1), x = INVYR, col = SWHW), shape = "triangle", alpha = 0.5) +
+  ylab("Plot code, sorted by burn year") +
+  xlab("Burn year") +
+  scale_x_continuous(breaks = seq(1960, 2020, by = 10)) +
+  ggtitle("Plots with confirmed multiple burns - Siskiyou & Trinity counties (CA Klamath)") +
+  theme_tufte()
+
+
+```
+
+```{r}
+
+confirmed %>%
+  filter(SWHW == "1_Softwoods") %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(diff = max(DSTRBYR1) - min(DSTRBYR1)) %>%
+  select(PLOT_FIADB, diff) %>%
+  distinct() %>%
+  ungroup() %>%
+  select(PLOT_FIADB, diff) %>%
+  ggplot() +
+  geom_histogram(aes(x = diff), position = "identity" ) +
+  theme_tufte()
+
+```
+
