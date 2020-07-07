@@ -406,21 +406,37 @@ confirmed %>%
 
 confirmed %>%
   filter(COUNTYCD %in% c(93, 105)) %>%
-  select(PLOT_FIADB, INVYR, DSTRBYR1, SWHW) %>%
-  mutate(PLOT_FIADB = as.factor(PLOT_FIADB)) %>%
+  select(PLOT_FIADB, INVYR, DSTRBYR1, SWHW, COUNTYCD) %>%
+  #mutate(PLOT_FIADB = as.factor(PLOT_FIADB)) %>%
   group_by(PLOT_FIADB) %>%
   mutate(diff = max(DSTRBYR1) - min(DSTRBYR1)) %>%
   distinct() %>%
   ungroup() %>%
-  arrange(PLOT_FIADB, DSTRBYR1) %>%
-  ggplot() +
+  arrange(COUNTYCD, PLOT_FIADB, DSTRBYR1) %>%
+  ggplot(.) +
+  #facet_grid(COUNTYCD ~ .) +
   geom_point(aes(y = reorder(PLOT_FIADB, DSTRBYR1), x = DSTRBYR1, col = SWHW)) +
-  #geom_point(aes(y = reorder(PLOT_FIADB, DSTRBYR1), x = INVYR, col = SWHW), shape = "triangle", alpha = 0.5) +
+  geom_point(aes(y = reorder(PLOT_FIADB, DSTRBYR1), x = INVYR, col = SWHW), shape = "triangle", alpha = 0.5) +
   ylab("Plot code, sorted by burn year") +
   xlab("Burn year") +
   scale_x_continuous(breaks = seq(1960, 2020, by = 10)) +
   ggtitle("Plots with confirmed multiple burns - Siskiyou & Trinity counties (CA Klamath)") +
   theme_tufte()
+
+
+```
+
+```{r}
+
+confirmed %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(max_diff = max(INVYR) - max(DSTRBYR1)) %>%
+  select(PLOT_FIADB, max_diff) %>%
+  distinct() %>%
+  ggplot() +
+  geom_histogram(aes(x = max_diff)) +
+  scale_x_continuous(breaks = seq(0, 20, by = 2)) +
+  theme_bw()
 
 
 ```
