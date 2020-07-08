@@ -366,14 +366,22 @@ confirmed <- add_row(confirmed, un_l1)
 
 un_p2 <- uncnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  left_join(cntyCds, by = c("COUNTYCD")) %>%
   group_by(PLOT_FIADB) %>%
-  mutate(diffBtwnFires = abs(max(DSTRBYR1) - min(DSTRBYR1))) %>%
-  filter(COUNTYCD %in% c(93, 105))
+  mutate(diffBtwnFires = abs(max(DSTRBYR1) - min(DSTRBYR1)))
 
+
+un_p2 %>%
+  filter(COUNTYCD %in% c(35)) %>%
+  View
 
 View(un_p2)
 
-un_p2 %>% group_by(SWHW) %>% summarise(n = n_distinct(PLOT_FIADB))
+un_p2 %>% 
+  left_join(cntyCds, by = c("COUNTYCD")) %>%
+  group_by(CNTY_NAME, SWHW) %>% 
+  summarise(n = n_distinct(PLOT_FIADB)) %>%
+  View
 
 # 12 more softwood plots and 5 more hardwood plots in the unconfirmed dataset - could use plot cards or
 # other checks to make judgement calls on whether they should be included.
@@ -387,12 +395,12 @@ un_p2 %>% group_by(SWHW) %>% summarise(n = n_distinct(PLOT_FIADB))
 
 cntyCds <- read_csv("../data/ca_cnty_cds.csv")
 
-confirmed %>%
+dat2process %>%
   group_by(OWNCD, SWHW) %>%
   summarize( n = n_distinct(PLOT_FIADB)) %>%
   View
 
-confirmed %>%
+dat2process %>%
   left_join(cntyCds, by = c("COUNTYCD")) %>%
   group_by(CNTY_NAME, OWNCD, SWHW) %>%
   summarize(n = n_distinct(PLOT_FIADB)) %>%
