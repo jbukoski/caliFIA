@@ -1,0 +1,147 @@
+---
+title: "Parsing single burn plots"
+author: "Jacob Bukoski"
+date: "7/9/2020"
+output: html_document
+---
+```{r}
+
+library(readxl)
+library(RSQLite)
+library(tidyverse)
+  
+filename <- "../data/TeamPotts1.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+db_COND_LB <- dbReadTable(db, "COND_LVL_LOOK_BACKS_PNW")
+db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
+
+# Combine above two tables
+
+all_dat <- db_PLOT_LB %>%
+  left_join(db_COND_LB, by = c("STATECD", "PLOT_FIADB", "DSTRBCD1", "DSTRBYR1", "INTENSITY"))
+
+# Load in the perimeter data and the FERS CA plots
+
+perimDat <- read_excel("../data/FireOverlay2.xlsx") %>%
+  arrange(plot_fiadb, FireYear) %>%
+  rename(PerimFireYear = FireYear)
+
+fersDat <- read_csv("../data/CA_FERS.csv", col_names = T, cols(PLOT_FIADB = col_double(), FIRE_YEAR = col_double()))
+cntyCds <- read_csv("../data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
+
+dbDisconnect(db)
+
+```
+
+```{r}
+
+# From Evan's code
+
+filename2 <- "../data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db2 <- dbConnect(sqlite.driver, dbname = filename2)
+
+
+pnwFIADBcond <- dbReadTable(db2, "COND")
+ForTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>% 
+  rename(FORTYPCD = REF_FORTYPCD)
+
+OWNGRPCDref <- matrix(c(11, "National Forest.", 
+                        12, "National Grassland and/or Prairie.", 
+                        13, "Other Forest Service Land.", 
+                        21, "National Park Service.", 
+                        22, "Bureau of Land Management.", 
+                        23, "Fish and Wildlife Service.", 
+                        24, "Departments of Defense/Energy.", 
+                        25, "Other Federal.", 
+                        31, "State including State public universities.", 
+                        32, "Local (County, Municipality, etc.) including water authorities.", 
+                        33, "Other non-federal public.", 
+                        46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% 
+  as.data.frame() %>% 
+  rename( "OWNCD" = "V1", "Description" = "V2") 
+
+OWNGRPCDref$OWNCD <- as.numeric(as.character(OWNGRPCDref$OWNCD))
+
+dbDisconnect(db)
+
+```
+
+```{r}
+
+q1 <- all_dat %>%
+  filter(STATECD == 6, ForestAtLastPostDistVisit == -1) %>%
+  select(STATECD, PLOT_FIADB, INVYR, DSTRBCD1, CONDID, DSTRBYR1, Source, ForestAtLastPostDistVisit) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n = n_distinct(DSTRBYR1)) %>%
+  filter(n == 1) %>%
+  arrange(PLOT_FIADB, DSTRBYR1, INVYR)
+
+length(unique(q1$PLOT_FIADB))
+
+q2 <- q1 %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n2 = n_distinct(interaction(PLOT_FIADB, DSTRBYR1))) %>%
+  filter(n2 == 1) %>%
+  select(-ForestAtLastPostDistVisit, -n)
+
+```
+
+```{r}
+
+jndData <- q2 %>%
+  left_join(perimDat, by = c("PLOT_FIADB" = "plot_fiadb")) %>%
+  left_join(fersDat, by = "PLOT_FIADB") %>%
+  left_join(select(pnwFIADBcond, "PLOT", "CONDID", "FORTYPCD", "OWNCD", "COUNTYCD"), 
+            by = c("PLOT_FIADB" = "PLOT", "CONDID")) %>%
+  left_join(cntyCds, by = "COUNTYCD") %>%
+  left_join(ForTypRef, by = "FORTYPCD") %>%
+  rename(fersFireYr = FIRE_YEAR) %>%
+  filter(DSTRBYR1 >= 1960) %>%
+  select(PLOT_FIADB, INVYR, DSTRBCD1, CONDID, Source, DSTRBYR1, PerimFireYear, 
+         fersFireYr, COUNTYCD, FORTYPCD, SWHW, OWNCD, CNTY_NAME) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_FIAfires = n_distinct(DSTRBYR1),
+         n_perimFires = n_distinct(PerimFireYear),
+         n_ferFiresYr = n_distinct(fersFireYr)) %>%
+  filter(n_FIAfires == 1) %>%
+  mutate(match = DSTRBYR1 %in% PerimFireYear | DSTRBYR1 %in% fersFireYr,
+         n_match = n_distinct(match)) %>%
+  ungroup()
+
+dat2process <- jndData %>%
+  filter(OWNCD == 11 | is.na(OWNCD))
+
+```
+
+```{r}
+
+singleBurns <- dat2process %>%
+  group_by(PLOT_FIADB) %>%
+  filter(match == TRUE) %>%
+  filter(n_perimFires <= 1 & n_ferFiresYr <= 1)
+  
+
+n_distinct(singleBurns$PLOT_FIADB)
+
+singleBurns %>%
+  group_by(CNTY_NAME, SWHW) %>%
+  summarize(n = n_distinct(PLOT_FIADB)) %>%
+  arrange(SWHW, -n, CNTY_NAME) %>%
+  View
+
+singleBurns %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(diff = max(INVYR) - DSTRBYR1) %>%
+  filter(diff < 1000) %>%
+  ungroup() %>%
+  select(PLOT_FIADB, INVYR, DSTRBYR1, diff) %>%
+  select(diff) %>%
+  ggplot() +
+  geom_histogram(aes(x = diff)) +
+  theme_bw()
+  
+
+```

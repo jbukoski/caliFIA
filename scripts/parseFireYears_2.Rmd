@@ -17,8 +17,6 @@ filename <- "../data/TeamPotts1.db"
 sqlite.driver <- dbDriver("SQLite")
 db <- dbConnect(sqlite.driver, dbname = filename)
 
-dbListTables(db)
-
 db_COND_LB <- dbReadTable(db, "COND_LVL_LOOK_BACKS_PNW")
 db_PLOT_LB <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
 
@@ -33,8 +31,8 @@ perimDat <- read_excel("../data/FireOverlay2.xlsx") %>%
   arrange(plot_fiadb, FireYear) %>%
   rename(PerimFireYear = FireYear)
 
-fersDat <- read_csv("../data/CA_FERS.csv")
-
+fersDat <- read_csv("../data/CA_FERS.csv", col_names = T, cols(PLOT_FIADB = col_double(), FIRE_YEAR = col_double()))
+cntyCds <- read_csv("../data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
 
 dbDisconnect(db)
 
@@ -120,11 +118,12 @@ n_distinct(dat2process$PLOT_FIADB)
 
 pltsThatFlippedToSingle <- c()
 
+
 ```
 
 ```{r}
 
-# Plots with exact match to perimeter fire year or FERS fire year (n = 29)
+# Plots with exact match to perimeter fire year or FERS fire year
 
 confirmed <- dat2process %>%
   filter(match == TRUE, n_match == 1, n_FIAfires == 2) %>%
@@ -151,7 +150,7 @@ length(unique(prtly_cnfrmd$PLOT_FIADB))
 
 #---
 
-# Rule 1, for plots with 2 FIA fire, 1 perimeter fire year, and the most recent burn
+# Rule 1, for plots with 2 FIA fires, 1 perimeter fire year, and the most recent burn
 # was confirmed by the perimeter fire year, keep the plot FIA years as long as the
 # distance between the fire years is greater than 5 years. (n = 65)
 
@@ -213,11 +212,11 @@ confirmed <- add_row(confirmed, prtly_list2)
 
 # Move other plots to single list (NEED TO REVISIT THESE)
 
-pltsThatFlippedToSingle <- prtly_p2 %>%
-  filter(n_fires == 1) %>%
-  pull(PLOT_FIADB) %>%
-  unique() %>%
-  c(pltsThatFlippedToSingle)
+# pltsThatFlippedToSingle <- prtly_p2 %>%
+#   filter(n_fires == 1) %>%
+#   pull(PLOT_FIADB) %>%
+#   unique() %>%
+#   c(pltsThatFlippedToSingle)
 
 # Rule 3, for plots that have 2 FIA fire years, 2 perimeter fire years, the more
 # recent burn confirmed by a fire perimieter year, and the historical burn before
@@ -309,25 +308,21 @@ prtly_list6 <- prtly_p6 %>%
 
 confirmed <- add_row(confirmed, prtly_list6)
 
-# Rule 7,
-
-prtly_p7 <- prtly_cnfrmd %>%
-  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
-  filter(COUNTYCD %in% c(93, 105))
-
-prtly_p7 %>%
-  group_by(SWHW) %>%
-  summarise( n = n_distinct(PLOT_FIADB))
-
-# 
-
-View(prtly_p7)
-
 # How to handle fires with just one burn?
 
 singlePerim <- prtly_cnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
   filter(n_perimFires == 1)
+
+# Remaining with multiple fire perimeter burn years:
+
+prtly_p7 <- prtly_cnfrmd %>%
+  filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
+  select(PLOT_FIADB:n_ferFiresYr)
+
+write_csv(filter(prtly_p7, SWHW == "1_Softwoods"), "../data/forAndy/01_prtly_confirmed_SW.csv")
+write_csv(filter(prtly_p7, is.na(SWHW)), "../data/forAndy/03_prtly_confirmed_NA.csv")
+write_csv(filter(prtly_p7, SWHW == "2_Hardwoods"), "../data/forAndy/05_prtly_confirmed_HW.csv")
 
 ```
 
@@ -340,8 +335,8 @@ uncnfrmd <- dat2process %>%
 
 length(unique(uncnfrmd$PLOT_FIADB))
 
-# Rule 1, If plots have two fia fire yaers, two perimeter fire years, the
-# max of the perimeter fire year is not greater than the max of the inventory
+# Rule 1, If plots have two fia fire years, two perimeter fire years, the
+# maximum of the perimeter fire year is not greater than the maximum of the inventory
 # year, and the years do not match exactly, substitute the perimeter fire years
 # for the FIA fire years.
 
@@ -362,29 +357,15 @@ un_l1 <- un_p1 %>%
 
 confirmed <- add_row(confirmed, un_l1)
 
-# Rule 2,
+# Remaining unconfirmed plots
 
 un_p2 <- uncnfrmd %>%
   filter(!(PLOT_FIADB %in% confirmed$PLOT_FIADB) & !(PLOT_FIADB %in% pltsThatFlippedToSingle)) %>%
-  left_join(cntyCds, by = c("COUNTYCD")) %>%
-  group_by(PLOT_FIADB) %>%
-  mutate(diffBtwnFires = abs(max(DSTRBYR1) - min(DSTRBYR1)))
-
-
-un_p2 %>%
-  filter(COUNTYCD %in% c(35)) %>%
-  View
-
-View(un_p2)
-
-un_p2 %>% 
-  left_join(cntyCds, by = c("COUNTYCD")) %>%
-  group_by(CNTY_NAME, SWHW) %>% 
-  summarise(n = n_distinct(PLOT_FIADB)) %>%
-  View
-
-# 12 more softwood plots and 5 more hardwood plots in the unconfirmed dataset - could use plot cards or
-# other checks to make judgement calls on whether they should be included.
+  select(PLOT_FIADB:n_ferFiresYr)
+  
+write_csv(filter(un_p2, SWHW == "1_Softwoods"), "../data/forAndy/02_unconfirmed_SW.csv")
+write_csv(filter(un_p2, is.na(SWHW)), "../data/forAndy/04_unconfirmed_NA.csv")
+write_csv(filter(un_p2, SWHW == "2_Hardwoods"), "../data/forAndy/06_unconfirmed_HW.csv")
 
 ```
 
@@ -395,12 +376,12 @@ un_p2 %>%
 
 cntyCds <- read_csv("../data/ca_cnty_cds.csv")
 
-dat2process %>%
+confirmed %>%
   group_by(OWNCD, SWHW) %>%
   summarize( n = n_distinct(PLOT_FIADB)) %>%
   View
 
-dat2process %>%
+confirmed %>%
   left_join(cntyCds, by = c("COUNTYCD")) %>%
   group_by(CNTY_NAME, OWNCD, SWHW) %>%
   summarize(n = n_distinct(PLOT_FIADB)) %>%
