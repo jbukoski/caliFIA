@@ -143,5 +143,9 @@ singleBurns %>%
   geom_histogram(aes(x = diff)) +
   theme_bw()
   
+singleBurns %>%
+  filter(SWHW == "1_Softwoods") %>%
+  pull(PLOT_FIADB) %>%
+  n_distinct()
 
 ```

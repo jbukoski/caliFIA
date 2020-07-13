@@ -374,7 +374,10 @@ write_csv(filter(un_p2, SWHW == "2_Hardwoods"), "../data/forAndy/06_unconfirmed_
 
 ```{r}
 
-cntyCds <- read_csv("../data/ca_cnty_cds.csv")
+cntyCds <- read_csv("../data/ca_cnty_cds.csv") %>%
+  mutate(region = ifelse(COUNTYCD %in% c(15, 23, 93, 105, 89, 103, 45, 21, 11, 33), "klamath", 
+                          ifelse(COUNTYCD %in% c(63, 91, 57, 61, 17, 5, 3, 9, 109, 51, 43, 39, 19, 27, 107, 29), "sierra", "other")))
+
 
 confirmed %>%
   group_by(OWNCD, SWHW) %>%
@@ -383,7 +386,7 @@ confirmed %>%
 
 confirmed %>%
   left_join(cntyCds, by = c("COUNTYCD")) %>%
-  group_by(CNTY_NAME, OWNCD, SWHW) %>%
+  group_by(region, OWNCD, SWHW) %>%
   summarize(n = n_distinct(PLOT_FIADB)) %>%
   arrange(SWHW, -n) %>%
   View
