@@ -46,7 +46,6 @@ filename2 <- "../data/PNW_PUBLIC_SQLite.db"
 sqlite.driver <- dbDriver("SQLite")
 db2 <- dbConnect(sqlite.driver, dbname = filename2)
 
-
 pnwFIADBcond <- dbReadTable(db2, "COND")
 ForTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>% 
   rename(FORTYPCD = REF_FORTYPCD)

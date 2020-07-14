@@ -1,0 +1,351 @@
+# A script to determine which reburn plots are "confirmed"
+# by fire perimeters, FERS data, or other sources.
+
+library(readxl)
+library(RSQLite)
+library(tidyverse)
+
+#----------------------
+# Database from Jeremy
+
+filename <- "./data/TeamPotts2.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+
+plot <- rename_all(dbReadTable(db, "PLOT"), tolower)
+cond <- rename_all(dbReadTable(db, "COND"), tolower)
+
+dbDisconnect(db)
+
+# Public database
+
+filename2 <- "./data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db2 <- dbConnect(sqlite.driver, dbname = filename2)
+
+pnwFIADBcond <- dbReadTable(db2, "COND")
+ForTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>% 
+  rename(FORTYPCD = REF_FORTYPCD) %>%
+  rename_all(tolower)
+
+dbDisconnect(db2)
+
+OWNGRPCDref <- matrix(c(11, "National Forest.", 
+                        12, "National Grassland and/or Prairie.", 
+                        13, "Other Forest Service Land.", 
+                        21, "National Park Service.", 
+                        22, "Bureau of Land Management.", 
+                        23, "Fish and Wildlife Service.", 
+                        24, "Departments of Defense/Energy.", 
+                        25, "Other Federal.", 
+                        31, "State including State public universities.", 
+                        32, "Local (County, Municipality, etc.) including water authorities.", 
+                        33, "Other non-federal public.", 
+                        46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% 
+  as.data.frame() %>% 
+  rename( "OWNCD" = "V1", "Description" = "V2") 
+
+OWNGRPCDref$OWNCD <- as.numeric(as.character(OWNGRPCDref$OWNCD))
+
+cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
+
+reburns <- read_csv("./data/processed/reburns.csv") %>%
+  mutate(intensity = as.character(intensity))
+
+#--------------------------
+#Joined data to process
+
+jndData <- reburns %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_fiafires = n_distinct(disturbyr),
+         n_perimfires = n_distinct(perim_fire),
+         n_fersfires = n_distinct(fers_fire)) %>%
+  mutate(match = disturbyr %in% perim_fire | disturbyr %in% fers_fire,
+         n_match = n_distinct(match)) %>%
+  ungroup() %>%
+  left_join(plot) %>%
+  left_join(cond, by = c("statecd", "plot_fiadb", "condid", "invyr")) %>%
+  left_join(ForTypRef) %>%
+  select(plot_fiadb, inventory, invyr, measyear, condid, anncd, intensity, 
+         fia_fire = disturbyr, perim_fire, fers_fire, n_fiafires, n_perimfires, 
+         n_fersfires, match, n_match, fortypcd, owngrpcd, swhw)
+
+dat2process <- jndData
+
+
+# 344 candidate reburn plots
+n_distinct(dat2process$plot_fiadb)
+
+#---------------------------------------------------
+#####################
+## Confirmed Plots ##
+#####################
+
+# Confirmed dataframe, both FIA fire years confirmed by fire perimeter or FERS
+# fire years.
+
+confirmed <- jndData %>%
+  filter(match == TRUE, n_match == 1, n_fiafires == 2) %>%
+  select(plot_fiadb, anncd, condid, fia_fire) %>%
+  mutate(df = "cnfrmd", 
+         rule = "both years confirmed by fire perimeter years",
+         fireYrSrc = "FIADB") %>%
+  distinct()
+
+#---------------------------------------------------
+############################
+## Partly Confirmed Plots ##
+############################
+
+prtly_cnfrmd <- dat2process %>%
+  filter(n_match == 2)
+
+length(unique(prtly_cnfrmd$plot_fiadb))
+
+# Rule 1, for plots with 2 FIA fires, 1 perimeter fire year, and the most recent burn
+# was confirmed by the perimeter fire year, keep the plot FIA years as long as the
+# distance between the fire years is greater than 5 years. (n = 65)
+
+prtly_p1 <- prtly_cnfrmd %>%
+  group_by(plot_fiadb) %>%
+  filter(n_fiafires == 2 & n_perimfires == 1 & 
+           (max(fia_fire) %in% perim_fire | max(fia_fire) %in% fers_fire) & 
+           (!(min(fia_fire) %in% perim_fire) | !(min(fia_fire %in% fers_fire)))) %>%
+  mutate(dstncBtwnFires1 = abs(fia_fire - perim_fire),
+         dstncBtwnFires2 = abs(fia_fire - fers_fire)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(dstncBtwnFires = max(dstncBtwnFires1, dstncBtwnFires2, na.rm = T)) %>%
+  select(-dstncBtwnFires1, -dstncBtwnFires2) %>%
+  ungroup() %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_visit = as.numeric(factor(measyear)),
+         keep = match,
+         keep = ifelse(match == FALSE & dstncBtwnFires > 5, TRUE, keep),
+         n_keep = n_distinct(keep)) %>%
+  ungroup()
+
+prtly_list1 <- prtly_p1 %>%
+  filter(keep == TRUE & n_keep == 1) %>%
+  select(colnames(confirmed[1:4])) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 1",
+         fireYrSrc = "FIADB")
+
+confirmed <- add_row(confirmed, prtly_list1)
+
+# Rule 2, for plots with two inventories and two disturbance years, but the burn
+# years are less than 5 years apart and the second burn year is both (a)
+# unconfirmed and (b) precedes the second burn year, adjust the second burn
+# year to the confirmed fire perimeter burn year.
+# Will shift plots to "single burn" category.
+
+
+prtly_p2 <- prtly_p1 %>%
+  filter(n_keep == 2) %>%
+  arrange(plot_fiadb, measyear) %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_records = n(),
+         keep = ifelse(n_records == 2 & fia_fire == min(fia_fire) & n_visit == 2, "FERS", "FIADB"),
+         fia_fire = ifelse(keep == "FERS", fers_fire, fia_fire)) %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_fires = n_distinct(fia_fire))
+
+prtly_list2 <- prtly_p2 %>%
+  filter(n_fires == 2) %>%
+  rename(fireYrSrc = keep) %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 2") %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+  
+
+confirmed <- add_row(confirmed, prtly_list2)
+
+# Move other plots to single list (NEED TO REVISIT THESE)
+
+# pltsThatFlippedToSingle <- prtly_p2 %>%
+#   filter(n_fires == 1) %>%
+#   pull(plot_fiadb) %>%
+#   unique() %>%
+#   c(pltsThatFlippedToSingle)
+
+# Rule 3, for plots that have 2 FIA fire years, 2 perimeter fire years, the more
+# recent burn confirmed by a fire perimieter year, and the historical burn before
+# 1980, assign the oldest perimeter burn year to the historical fire year slot.
+
+prtly_p3 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_fiafires == 2 & n_perimfires == 2) %>%
+  group_by(plot_fiadb) %>%
+  mutate(dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%
+  filter((min(fia_fire) < 1990) & (max(fia_fire) == max(perim_fire) & (min(fia_fire) != min(perim_fire))) ) %>%
+  mutate(fireYrSrc = ifelse(match == TRUE, "FIADB", "PERIM"),
+         fia_fire = ifelse(match == TRUE, fia_fire, min(perim_fire))) %>%
+  ungroup()
+
+prtly_list3 <- prtly_p3 %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 3") %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+  
+
+confirmed <- add_row(confirmed, prtly_list3)  
+
+# Rule 4, for plots with 2 inventory years, 2 FIA fire years, 2 Perimeter 
+# Fire Years and the difference between the oldest FIA fire and oldest Perim
+# Fire year <= 10 years, substitute min(perim_fire) for min(fia_fire)
+
+prtly_p4 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  group_by(plot_fiadb) %>%
+  filter(!any(fia_fire == 9999)) %>%
+  mutate(n_measyear = n_distinct(measyear)) %>%
+  filter(n_measyear == 2 & n_fiafires == 2 & n_perimfires == 2) %>%
+  mutate(dstncBtwnMinFireYrs = abs(min(fia_fire) - min(perim_fire))) %>%
+  filter(dstncBtwnMinFireYrs < 10 & any(match == FALSE & fia_fire == min(fia_fire))) %>% 
+  mutate(fireYrSrc = ifelse(match == FALSE, "PERIM", "FIADB"),
+         fia_fire = ifelse(fireYrSrc == "PERIM", min(perim_fire), fia_fire))
+
+prtly_list4 <- prtly_p4 %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 4") %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+
+confirmed <- add_row(confirmed, prtly_list4)
+
+# Rule 5, fire plots with 2 FIA fires and 2 or more perimeter fire years, calculate
+# the minimum distance between the FIA fires and perimeter fire year candidates and
+# keep FIADB burn yr if exact match, otherwise substitute Perimeter fire year
+
+prtly_p5 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_fiafires == 2 & n_perimfires >= 2) %>%
+  group_by(plot_fiadb) %>%
+  filter(!any(fia_fire == 9999)) %>%
+  group_by(plot_fiadb, measyear, condid, anncd, fia_fire) %>%
+  mutate(diff = abs(fia_fire - perim_fire)) %>%
+  filter(diff == min(diff)) %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_perimfires = n_distinct(perim_fire)) %>%
+  filter(!any(diff >= 10) & min(fia_fire) <= 2000 & n_perimfires == 2) %>%
+  mutate(fireYrSrc = ifelse(fia_fire == perim_fire, "FIADB", "PERIM"),
+         fia_fire = ifelse(fireYrSrc == "PERIM", perim_fire, fia_fire))
+
+prtly_list5 <- prtly_p5 %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 4") %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+
+confirmed <- add_row(confirmed, prtly_list5)
+
+# Rule 6, For plots with two perimeter fire years, two FIA fire years
+# with one FIA fire yr confirmed and one FIA fire yr as 9999, replace the
+# 9999 fire year with the second perimeter fire year.
+
+prtly_p6 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  group_by(plot_fiadb) %>%
+  filter(n_perimfires == 2 & any(fia_fire == 9999)) %>%
+  mutate(fireYrSrc = ifelse(fia_fire == 9999, "PERIM", "FIADB"),
+         fia_fire = ifelse(fireYrSrc == "PERIM", min(perim_fire), fia_fire))
+
+prtly_list6 <- prtly_p6 %>%
+  mutate(df = "prtly_cnfrmd",
+         rule = "rule 4") %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+
+confirmed <- add_row(confirmed, prtly_list6)
+
+# How to handle fires with just one burn?
+
+singlePerim <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_perimfires == 1)
+
+# Remaining with multiple fire perimeter burn years:
+
+prtly_p7 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  select(plot_fiadb:n_fersfires)%>%
+  left_join(plot) %>%
+  left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
+  left_join(ForTypRef) %>%
+  left_join(rename_all(cntyCds, tolower)) %>%
+  select(colnames(un_p2), cnty_name, owngrpcd, swhw)
+
+
+write_csv(filter(prtly_p7, swhw == "1_Softwoods"), "./data/forAndy/01_prtly_confirmed_SW.csv")
+write_csv(filter(prtly_p7, swhw != "1_Softwoods"), "./data/forAndy/03_prtly_confirmed_other.csv")
+
+#-----------------------------------
+#######################
+## Unconfirmed Plots ##
+#######################
+
+uncnfrmd <- dat2process %>%
+  filter(match == FALSE, n_match == 1) 
+
+length(unique(uncnfrmd$plot_fiadb))
+
+# Rule 1, If plots have two fia fire years, two perimeter fire years, the
+# maximum of the perimeter fire year is not greater than the maximum of the inventory
+# year, and the years do not match exactly, substitute the perimeter fire years
+# for the FIA fire years.
+
+un_p1 <- uncnfrmd %>%
+  filter(n_fiafires == 2 & n_perimfires == 2) %>%
+  group_by(plot_fiadb) %>%
+  filter(max(perim_fire) <= max(invyr)) %>%
+  mutate(max_diff = abs(max(perim_fire) - max(fia_fire)),
+         min_diff = abs(min(perim_fire) - min(fia_fire))) %>%
+  mutate(fireYrSrc = "PERIM") %>%
+  mutate(fia_fire = ifelse(fia_fire == max(fia_fire), max(perim_fire), min(perim_fire)))
+
+un_l1 <- un_p1 %>%
+  mutate(df = "prtly_cnfrmd", rule = "rule 6")  %>%
+  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  unique()
+
+confirmed <- add_row(confirmed, un_l1)
+
+# Remaining unconfirmed plots
+
+un_p2 <- uncnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  select(plot_fiadb:n_fersfires) %>%
+  left_join(plot) %>%
+  left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
+  left_join(ForTypRef) %>%
+  left_join(rename_all(cntyCds, tolower)) %>%
+  select(colnames(un_p2), cnty_name, owngrpcd, swhw) %>%
+  group_by(plot_fiadb)
+
+write_csv(filter(un_p2, swhw == "1_Softwoods"), "./data/forAndy/02_unconfirmed_SW.csv")
+write_csv(filter(un_p2, swhw != "1_Softwoods"), "./data/forAndy/04_unconfirmed_other.csv")
+
+un_p2 %>%
+  filter(swhw != "1_Softwoods") %>%
+  pull(plot_fiadb) %>%
+  n_distinct()
+
+# 
+# summary_dat <- dat2process %>%
+#   left_join(plot) %>%
+#   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
+#   left_join(ForTypRef) %>%
+#   left_join(rename_all(cntyCds, tolower)) %>%
+#   filter(plot_fiadb %in% unique(confirmed$plot_fiadb)) %>%
+#   select(plot_fiadb, invyr, measyear, fia_fire, cnty_name, owngrpcd, swhw)
+# 
+# 
+# summary_dat %>%
+#   group_by(swhw, owngrpcd) %>%
+#   summarise(n = n_distinct(plot_fiadb)) %>%
+#   arrange(swhw, -n) %>%
+#   View
