@@ -111,6 +111,10 @@ dat2join <- db_cond_lb %>%
   rename(disturbyr = dstrbyr1, anncd = dstrbcd1) %>%
   select(statecd, plot_fiadb, inventory, oc, measyear, condid, disturbyr, anncd, intensity)
   
+# Join the ag_fixed fire plots - those that were adjusted above, the adjusted
+# plots from above, and all records with measurement years greater than or
+# equal to 2013.
+
 all_dat <- ag_fixed_fire %>%
   select(-anntxt) %>%
   filter(!(plot_fiadb %in% fix_plots)) %>%
@@ -121,7 +125,7 @@ all_dat <- ag_fixed_fire %>%
   distinct()
 
 #----------------------------------
-# Filter to just those plots with reburns
+# Filter to just those candidates for plots with reburn data
 
 reburns <- all_dat %>%
   group_by(plot_fiadb) %>%
@@ -134,7 +138,7 @@ reburns <- all_dat %>%
 write_csv(reburns, "./data/processed/reburns.csv")
 
 #----------------------------------
-# Filter to just those plots with single burns
+# Filter to just those candidates for plots with single burns
 
 singles <- all_dat %>%
   group_by(plot_fiadb) %>%
@@ -142,6 +146,46 @@ singles <- all_dat %>%
   ungroup() %>%
   filter(n_fia_fires == 1) %>%
   left_join(perimDat, by = "plot_fiadb") %>%
-  left_join(fersDat, by = "plot_fiadb")
+  left_join(fersDat, by = "plot_fiadb") %>%
+  select(-statecd) %>%
+  rename(fia_fire = disturbyr, n_fiafires = n_fia_fires)
 
-write_csv(reburns, "./data/processed/singles.csv")
+write_csv(singles, "./data/processed/singles.csv")
+
+#----------------------------------
+# Owner Group Code reference table
+
+OWNGRPCDref <- matrix(c(11, "National Forest.", 
+                        12, "National Grassland and/or Prairie.", 
+                        13, "Other Forest Service Land.", 
+                        21, "National Park Service.", 
+                        22, "Bureau of Land Management.", 
+                        23, "Fish and Wildlife Service.", 
+                        24, "Departments of Defense/Energy.", 
+                        25, "Other Federal.", 
+                        31, "State including State public universities.", 
+                        32, "Local (County, Municipality, etc.) including water authorities.", 
+                        33, "Other non-federal public.", 
+                        46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% 
+  as.data.frame() %>% 
+  rename( "OWNCD" = "V1", "Description" = "V2") %>%
+  mutate(OWNCD = as.numeric(as.character(OWNCD)))
+
+write_csv(OWNGRPCDref, "./data/processed/ownGrpCdRef.csv")
+
+#---------------------------------
+# Forest Type reference table (from public database)
+
+filename2 <- "./data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db2 <- dbConnect(sqlite.driver, dbname = filename2)
+
+pnwFIADBcond <- dbReadTable(db2, "COND")
+
+forTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>% 
+  rename(FORTYPCD = REF_FORTYPCD) %>%
+  rename_all(tolower)
+
+dbDisconnect(db2)
+
+write_csv(forTypRef, "./data/processed/forestTypeRef.csv")

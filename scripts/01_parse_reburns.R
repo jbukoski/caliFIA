@@ -17,37 +17,17 @@ cond <- rename_all(dbReadTable(db, "COND"), tolower)
 
 dbDisconnect(db)
 
-# Public database
+# Load in complementary databases
 
-filename2 <- "./data/PNW_PUBLIC_SQLite.db"
-sqlite.driver <- dbDriver("SQLite")
-db2 <- dbConnect(sqlite.driver, dbname = filename2)
-
-pnwFIADBcond <- dbReadTable(db2, "COND")
-ForTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>% 
-  rename(FORTYPCD = REF_FORTYPCD) %>%
+ForTypRef <- read_csv("./data/processed/forestTypeRef.csv") %>%
   rename_all(tolower)
 
-dbDisconnect(db2)
-
-OWNGRPCDref <- matrix(c(11, "National Forest.", 
-                        12, "National Grassland and/or Prairie.", 
-                        13, "Other Forest Service Land.", 
-                        21, "National Park Service.", 
-                        22, "Bureau of Land Management.", 
-                        23, "Fish and Wildlife Service.", 
-                        24, "Departments of Defense/Energy.", 
-                        25, "Other Federal.", 
-                        31, "State including State public universities.", 
-                        32, "Local (County, Municipality, etc.) including water authorities.", 
-                        33, "Other non-federal public.", 
-                        46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% 
-  as.data.frame() %>% 
-  rename( "OWNCD" = "V1", "Description" = "V2") 
-
-OWNGRPCDref$OWNCD <- as.numeric(as.character(OWNGRPCDref$OWNCD))
-
 cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
+
+# Load in table of reburns (main table)
+
+singles <- read_csv("./data/processed/singles.csv") %>%
+  mutate(intensity = as.character(intensity))
 
 reburns <- read_csv("./data/processed/reburns.csv") %>%
   mutate(intensity = as.character(intensity))
@@ -55,7 +35,7 @@ reburns <- read_csv("./data/processed/reburns.csv") %>%
 #--------------------------
 #Joined data to process
 
-jndData <- reburns %>%
+dat2process <- reburns %>%
   group_by(plot_fiadb) %>%
   mutate(n_fiafires = n_distinct(disturbyr),
          n_perimfires = n_distinct(perim_fire),
@@ -69,9 +49,6 @@ jndData <- reburns %>%
   select(plot_fiadb, inventory, invyr, measyear, condid, anncd, intensity, 
          fia_fire = disturbyr, perim_fire, fers_fire, n_fiafires, n_perimfires, 
          n_fersfires, match, n_match, fortypcd, owngrpcd, swhw)
-
-dat2process <- jndData
-
 
 # 344 candidate reburn plots
 n_distinct(dat2process$plot_fiadb)
@@ -262,26 +239,58 @@ prtly_list6 <- prtly_p6 %>%
 
 confirmed <- add_row(confirmed, prtly_list6)
 
-# How to handle fires with just one burn?
-
-singlePerim <- prtly_cnfrmd %>%
-  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
-  filter(n_perimfires == 1)
-
-# Remaining with multiple fire perimeter burn years:
+#-----------------------------
 
 prtly_p7 <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_fiafires == 2) %>%
+  group_by(plot_fiadb) %>%
+  mutate(fia_diff = max(fia_fire) - min(fia_fire)) %>%
+  filter(fia_diff <= 5, plot_fiadb != 79088) %>%
+  filter(min(fia_fire) %in% perim_fire) %>%
+  mutate(fireYrSrc = ifelse(fia_fire == perim_fire, "FIADB", "PERIM")) %>%
+  filter(fireYrSrc == "FIADB") %>%
+  mutate(n_fiafires = n_distinct(fia_fire)) %>%
+  distinct()
+
+new_singles <- singles %>%
+  bind_rows(prtly_p7)
+  
+View(new_singles)
+
+#-----------------------------
+
+prtly_p8 <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb) & !(plot_fiadb %in% new_singles$plot_fiadb))
+
+View(prtly_p8)
+
+# How to handle fires with just one burn?
+
+singlePerim <- prtly_p8 %>%
+  filter(n_perimfires == 1)
+
+n_distinct(singlePerim$plot_fiadb)
+
+
+# Remaining with multiple fire perimeter burn years:
+
+prtly_forAndy <- prtly_p8 %>%
   select(plot_fiadb:n_fersfires)%>%
+  mutate(fireYrSrc = NA) %>%
   left_join(plot) %>%
   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
   left_join(ForTypRef) %>%
   left_join(rename_all(cntyCds, tolower)) %>%
-  select(colnames(un_p2), cnty_name, owngrpcd, swhw)
+  select(colnames(prtly_p6[c(1:13, 16:19)])) %>%
+  group_by(plot_fiadb)
 
+n_distinct(prtly_forAndy$plot_fiadb)
 
-write_csv(filter(prtly_p7, swhw == "1_Softwoods"), "./data/forAndy/01_prtly_confirmed_SW.csv")
-write_csv(filter(prtly_p7, swhw != "1_Softwoods"), "./data/forAndy/03_prtly_confirmed_other.csv")
+View(prtly_forAndy)
+
+write_csv(distinct(filter(prtly_forAndy, "1_Softwoods" %in% swhw)), "./data/forAndy/01_prtly_confirmed_SW.csv")
+write_csv(distinct(filter(prtly_forAndy, !("1_Softwoods" %in% swhw))), "./data/forAndy/03_prtly_confirmed_other.csv")
 
 #-----------------------------------
 #######################
@@ -314,38 +323,31 @@ un_l1 <- un_p1 %>%
 
 confirmed <- add_row(confirmed, un_l1)
 
+#-------------------
+
+un_p2 <- uncnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  select(plot_fiadb:n_fersfires) %>%
+  #filter(n_fiafires == 2) %>%
+  group_by(plot_fiadb) %>%
+  mutate(fia_diff = max(fia_fire) - min(fia_fire))
+
+View(un_p2)
+
 # Remaining unconfirmed plots
 
 un_p2 <- uncnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
   select(plot_fiadb:n_fersfires) %>%
+  mutate(fireYrSrc = NA) %>%
   left_join(plot) %>%
   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
   left_join(ForTypRef) %>%
   left_join(rename_all(cntyCds, tolower)) %>%
-  select(colnames(un_p2), cnty_name, owngrpcd, swhw) %>%
+  select(colnames(prtly_p6[c(1:13, 16:19)])) %>%
   group_by(plot_fiadb)
 
-write_csv(filter(un_p2, swhw == "1_Softwoods"), "./data/forAndy/02_unconfirmed_SW.csv")
-write_csv(filter(un_p2, swhw != "1_Softwoods"), "./data/forAndy/04_unconfirmed_other.csv")
+View(un_p2)
 
-un_p2 %>%
-  filter(swhw != "1_Softwoods") %>%
-  pull(plot_fiadb) %>%
-  n_distinct()
-
-# 
-# summary_dat <- dat2process %>%
-#   left_join(plot) %>%
-#   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
-#   left_join(ForTypRef) %>%
-#   left_join(rename_all(cntyCds, tolower)) %>%
-#   filter(plot_fiadb %in% unique(confirmed$plot_fiadb)) %>%
-#   select(plot_fiadb, invyr, measyear, fia_fire, cnty_name, owngrpcd, swhw)
-# 
-# 
-# summary_dat %>%
-#   group_by(swhw, owngrpcd) %>%
-#   summarise(n = n_distinct(plot_fiadb)) %>%
-#   arrange(swhw, -n) %>%
-#   View
+write_csv(distinct(filter(un_p2, "1_Softwoods" %in% swhw)), "./data/forAndy/02_unconfirmed_SW.csv")
+write_csv(distinct(filter(un_p2, !("1_Softwoods" %in% swhw))), "./data/forAndy/04_unconfirmed_other.csv")
