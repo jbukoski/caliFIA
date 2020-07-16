@@ -189,3 +189,8 @@ forTypRef <- dbReadTable(db2, "REF_FOREST_TYPE") %>%
 dbDisconnect(db2)
 
 write_csv(forTypRef, "./data/processed/forestTypeRef.csv")
+
+#---------------------------------
+# Clean up files
+
+rm(list = ls())

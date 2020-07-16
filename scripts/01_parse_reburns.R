@@ -22,7 +22,8 @@ dbDisconnect(db)
 ForTypRef <- read_csv("./data/processed/forestTypeRef.csv") %>%
   rename_all(tolower)
 
-cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
+cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, 
+                    cols(CNTY_NAME = col_character(), COUNTYCD = col_double()))
 
 # Load in table of reburns (main table)
 
@@ -61,12 +62,16 @@ n_distinct(dat2process$plot_fiadb)
 # Confirmed dataframe, both FIA fire years confirmed by fire perimeter or FERS
 # fire years.
 
-confirmed <- jndData %>%
+confirmed <- dat2process %>%
   filter(match == TRUE, n_match == 1, n_fiafires == 2) %>%
-  select(plot_fiadb, anncd, condid, fia_fire) %>%
+  select(plot_fiadb, invyr, measyear, condid, anncd, fia_fire) %>%
+  arrange(plot_fiadb, measyear, fia_fire) %>%
   mutate(df = "cnfrmd", 
-         rule = "both years confirmed by fire perimeter years",
-         fireYrSrc = "FIADB") %>%
+         fireYrSrc = "FIADB",
+         confidence = 3,
+         evidence = "both years confirmed by fire perimeter years",
+         notes = NA
+         ) %>%
   distinct()
 
 #---------------------------------------------------
@@ -79,9 +84,10 @@ prtly_cnfrmd <- dat2process %>%
 
 length(unique(prtly_cnfrmd$plot_fiadb))
 
-# Rule 1, for plots with 2 FIA fires, 1 perimeter fire year, and the most recent burn
-# was confirmed by the perimeter fire year, keep the plot FIA years as long as the
-# distance between the fire years is greater than 5 years. (n = 65)
+# Rule 1, for plots with 2 FIA fires, 1 perimeter fire year, and the most 
+# recent burn was confirmed by the perimeter fire year, keep the plot FIA
+# years as long as the distance between the fire years is greater than 5 
+# years. No second perimeter fire year to confirm.
 
 prtly_p1 <- prtly_cnfrmd %>%
   group_by(plot_fiadb) %>%
@@ -104,11 +110,14 @@ prtly_p1 <- prtly_cnfrmd %>%
 
 prtly_list1 <- prtly_p1 %>%
   filter(keep == TRUE & n_keep == 1) %>%
-  select(colnames(confirmed[1:4])) %>%
+  select(colnames(confirmed[1:6])) %>%
   unique() %>%
-  mutate(df = "prtly_cnfrmd",
-         rule = "rule 1",
-         fireYrSrc = "FIADB")
+  mutate(fireYrSrc = "FIADB",
+         df = "prtly_cnfrmd",
+         confidence = 3,
+         evidence = "rule 1 - if most recent burn confirmed perimeter and 
+         distance between burns > 5 yrs, keep both",
+         notes = NA)
 
 confirmed <- add_row(confirmed, prtly_list1)
 
@@ -117,7 +126,6 @@ confirmed <- add_row(confirmed, prtly_list1)
 # unconfirmed and (b) precedes the second burn year, adjust the second burn
 # year to the confirmed fire perimeter burn year.
 # Will shift plots to "single burn" category.
-
 
 prtly_p2 <- prtly_p1 %>%
   filter(n_keep == 2) %>%
@@ -132,48 +140,110 @@ prtly_p2 <- prtly_p1 %>%
 prtly_list2 <- prtly_p2 %>%
   filter(n_fires == 2) %>%
   rename(fireYrSrc = keep) %>%
+  select(colnames(confirmed[1:6])) %>%
   mutate(df = "prtly_cnfrmd",
-         rule = "rule 2") %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+         confidence = 0,
+         evidence = "rule 2",
+         notes = NA) %>%
   unique()
   
 
-confirmed <- add_row(confirmed, prtly_list2)
+#confirmed <- add_row(confirmed, prtly_list2)
 
-# Move other plots to single list (NEED TO REVISIT THESE)
+# Rule 3, for plots that have 2 FIA fire years, 2 perimeter fire years, the 
+# more recent burn confirmed by a fire perimeter year, the historical burn 
+# before 1990, and the distance between the oldest burns is <= 5 years, assign
+# the oldest perimeter burn year to the historical fire year slot.
 
-# pltsThatFlippedToSingle <- prtly_p2 %>%
-#   filter(n_fires == 1) %>%
-#   pull(plot_fiadb) %>%
-#   unique() %>%
-#   c(pltsThatFlippedToSingle)
-
-# Rule 3, for plots that have 2 FIA fire years, 2 perimeter fire years, the more
-# recent burn confirmed by a fire perimieter year, and the historical burn before
-# 1980, assign the oldest perimeter burn year to the historical fire year slot.
-
-prtly_p3 <- prtly_cnfrmd %>%
+prtly_p3a <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
-  filter(n_fiafires == 2 & n_perimfires == 2) %>%
+  filter(n_fiafires == 2 & n_perimfires == 2) %>% View
   group_by(plot_fiadb) %>%
-  mutate(dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%
-  filter((min(fia_fire) < 1990) & (max(fia_fire) == max(perim_fire) & (min(fia_fire) != min(perim_fire))) ) %>%
+  mutate(n_perimfires = n_distinct(perim_fire),
+         dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%
+  filter((min(fia_fire) < 1990) & 
+         (max(fia_fire) == max(perim_fire) & 
+         (min(fia_fire) != min(perim_fire))) & 
+         dstnc_minFireYr <= 5) %>%
   mutate(fireYrSrc = ifelse(match == TRUE, "FIADB", "PERIM"),
          fia_fire = ifelse(match == TRUE, fia_fire, min(perim_fire))) %>%
   ungroup()
 
-prtly_list3 <- prtly_p3 %>%
+prtly_list3a <- prtly_p3a %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
   mutate(df = "prtly_cnfrmd",
-         rule = "rule 3") %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+         confidence = 2,
+         evidence = "rule 3a - most recent burn confirmed by perim, 
+         older burn less than 5 yrs diff from perim data",
+         notes = NA) %>%
   unique()
   
+confirmed <- add_row(confirmed, prtly_list3a)  
 
-confirmed <- add_row(confirmed, prtly_list3)  
+# Rule 3A, for plots that have 2 FIA fire years, 2 perimeter fire years, the 
+# more recent burn confirmed by a fire perimeter year, the historical burn 
+# before 1990, and the distance between the oldest burns is > 5 years & < 10
+# years, assign the oldest perimeter burn year to historical fire year slot.
 
-# Rule 4, for plots with 2 inventory years, 2 FIA fire years, 2 Perimeter 
-# Fire Years and the difference between the oldest FIA fire and oldest Perim
-# Fire year <= 10 years, substitute min(perim_fire) for min(fia_fire)
+prtly_p3b <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_fiafires == 2 & n_perimfires == 2) %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_perimfires = n_distinct(perim_fire),
+         dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%
+  filter((min(fia_fire) < 1990) & 
+           (max(fia_fire) == max(perim_fire) & 
+              (min(fia_fire) != min(perim_fire))) & 
+           dstnc_minFireYr > 5 & dstnc_minFireYr <= 10) %>%
+  mutate(fireYrSrc = ifelse(match == TRUE, "FIADB", "PERIM"),
+         fia_fire = ifelse(match == TRUE, fia_fire, min(perim_fire))) %>%
+  ungroup()
+
+prtly_list3b <- prtly_p3b %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
+  mutate(df = "prtly_cnfrmd",
+         confidence = 2,
+         evidence = "rule 3b - most recent burn confirmed by perim, older 
+         burn >5 & <10 yrs diff from perim data",
+         notes = NA) %>%
+  unique()
+
+confirmed <- add_row(confirmed, prtly_list3b) 
+
+# Rule 3c, for plots that have 2 FIA fire years, 2 perimeter fire years, the 
+# more recent burn confirmed by a fire perimeter year, the historical burn 
+# before 1990, and the distance between the oldest burns is > 10 years, 
+# assign the oldest perimeter burn year to historical fire year slot.
+
+prtly_p3c <- prtly_cnfrmd %>%
+  filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
+  filter(n_fiafires == 2 & n_perimfires == 2) %>%
+  group_by(plot_fiadb) %>%
+  mutate(n_perimfires = n_distinct(perim_fire),
+         dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%
+  filter((min(fia_fire) < 1990) & 
+           (max(fia_fire) == max(perim_fire) & 
+              (min(fia_fire) != min(perim_fire))) & 
+           dstnc_minFireYr > 10) %>%
+  mutate(fireYrSrc = ifelse(match == TRUE, "FIADB", "PERIM"),
+         fia_fire = ifelse(match == TRUE, fia_fire, min(perim_fire))) %>%
+  ungroup()
+
+prtly_list3c <- prtly_p3c %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
+  mutate(df = "prtly_cnfrmd",
+         confidence = 1,
+         evidence = "rule 3c - most recent burn confirmed by perim, oldest 
+         burn > 10 yrs diff from perim data",
+         notes = NA) %>%
+  unique()
+
+confirmed <- add_row(confirmed, prtly_list3c)
+
+# Rule 4, for plots with 2 inventory years, 2 FIA fire years, 2 perimeter 
+# fire yers and the difference between the oldest FIA fire and oldest perim
+# fire year <= 10 years, & oldest burn > 1990, substitute min(perim_fire)
+# for min(fia_fire).
 
 prtly_p4 <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
@@ -182,21 +252,24 @@ prtly_p4 <- prtly_cnfrmd %>%
   mutate(n_measyear = n_distinct(measyear)) %>%
   filter(n_measyear == 2 & n_fiafires == 2 & n_perimfires == 2) %>%
   mutate(dstncBtwnMinFireYrs = abs(min(fia_fire) - min(perim_fire))) %>%
-  filter(dstncBtwnMinFireYrs < 10 & any(match == FALSE & fia_fire == min(fia_fire))) %>% 
+  filter(dstncBtwnMinFireYrs < 10 & any(match == FALSE & fia_fire == min(fia_fire))) %>%
   mutate(fireYrSrc = ifelse(match == FALSE, "PERIM", "FIADB"),
          fia_fire = ifelse(fireYrSrc == "PERIM", min(perim_fire), fia_fire))
 
 prtly_list4 <- prtly_p4 %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
   mutate(df = "prtly_cnfrmd",
-         rule = "rule 4") %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+         confidence = 2,
+         evidence = "rule 4 - plots with older fia burns since 1990, most recent burn 
+         confirmed by perim, older burn less than 5 yrs diff from perim data",
+         notes = NA) %>%
   unique()
 
 confirmed <- add_row(confirmed, prtly_list4)
 
 # Rule 5, fire plots with 2 FIA fires and 2 or more perimeter fire years, calculate
 # the minimum distance between the FIA fires and perimeter fire year candidates and
-# keep FIADB burn yr if exact match, otherwise substitute Perimeter fire year
+# keep FIADB burn yr if exact match, otherwise substitute perimeter fire year
 
 prtly_p5 <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
@@ -213,9 +286,11 @@ prtly_p5 <- prtly_cnfrmd %>%
          fia_fire = ifelse(fireYrSrc == "PERIM", perim_fire, fia_fire))
 
 prtly_list5 <- prtly_p5 %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
   mutate(df = "prtly_cnfrmd",
-         rule = "rule 4") %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+         confidence = 2,
+         evidence = "rule 5 - Similar to rule 3b, but catching plots that were not caught in those filters",
+         notes = NA) %>%
   unique()
 
 confirmed <- add_row(confirmed, prtly_list5)
@@ -232,9 +307,11 @@ prtly_p6 <- prtly_cnfrmd %>%
          fia_fire = ifelse(fireYrSrc == "PERIM", min(perim_fire), fia_fire))
 
 prtly_list6 <- prtly_p6 %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
   mutate(df = "prtly_cnfrmd",
-         rule = "rule 4") %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+         confidence = 1,
+         evidence = "rule 6 - substitute second perimeter year for 9999 disturbance year values",
+         notes = NA) %>%
   unique()
 
 confirmed <- add_row(confirmed, prtly_list6)
@@ -256,14 +333,14 @@ prtly_p7 <- prtly_cnfrmd %>%
 new_singles <- singles %>%
   bind_rows(prtly_p7)
   
-View(new_singles)
+#View(new_singles)
 
 #-----------------------------
 
 prtly_p8 <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb) & !(plot_fiadb %in% new_singles$plot_fiadb))
 
-View(prtly_p8)
+#View(prtly_p8)
 
 # How to handle fires with just one burn?
 
@@ -286,8 +363,6 @@ prtly_forAndy <- prtly_p8 %>%
   group_by(plot_fiadb)
 
 n_distinct(prtly_forAndy$plot_fiadb)
-
-View(prtly_forAndy)
 
 write_csv(distinct(filter(prtly_forAndy, "1_Softwoods" %in% swhw)), "./data/forAndy/01_prtly_confirmed_SW.csv")
 write_csv(distinct(filter(prtly_forAndy, !("1_Softwoods" %in% swhw))), "./data/forAndy/03_prtly_confirmed_other.csv")
@@ -317,8 +392,11 @@ un_p1 <- uncnfrmd %>%
   mutate(fia_fire = ifelse(fia_fire == max(fia_fire), max(perim_fire), min(perim_fire)))
 
 un_l1 <- un_p1 %>%
-  mutate(df = "prtly_cnfrmd", rule = "rule 6")  %>%
-  select(colnames(confirmed[1:4]), df, rule, fireYrSrc) %>%
+  select(colnames(confirmed[1:6]), fireYrSrc) %>%
+  mutate(df = "prtly_cnfrmd", 
+         confidence = 1,
+         evidence = "rule 1 (unconfirmed) - substitute perimeter years for fia fire years if max(perim) < max(invyr) ",
+         notes = NA)  %>%
   unique()
 
 confirmed <- add_row(confirmed, un_l1)
@@ -331,8 +409,6 @@ un_p2 <- uncnfrmd %>%
   #filter(n_fiafires == 2) %>%
   group_by(plot_fiadb) %>%
   mutate(fia_diff = max(fia_fire) - min(fia_fire))
-
-View(un_p2)
 
 # Remaining unconfirmed plots
 
@@ -347,7 +423,11 @@ un_p2 <- uncnfrmd %>%
   select(colnames(prtly_p6[c(1:13, 16:19)])) %>%
   group_by(plot_fiadb)
 
-View(un_p2)
-
 write_csv(distinct(filter(un_p2, "1_Softwoods" %in% swhw)), "./data/forAndy/02_unconfirmed_SW.csv")
 write_csv(distinct(filter(un_p2, !("1_Softwoods" %in% swhw))), "./data/forAndy/04_unconfirmed_other.csv")
+
+
+#-------------------------
+# Write out the confirmed reburns
+
+write_csv(arrange(confirmed, plot_fiadb, measyear, fia_fire), "./data/processed/conf_reburns.csv")
