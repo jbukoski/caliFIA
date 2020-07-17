@@ -359,7 +359,8 @@ prtly_forAndy <- prtly_p8 %>%
   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
   left_join(ForTypRef) %>%
   left_join(rename_all(cntyCds, tolower)) %>%
-  select(colnames(prtly_p6[c(1:13, 16:19)])) %>%
+  mutate(fireYrSrc = "", confidence = "", evidence = "", notes = "") %>%
+  select(colnames(prtly_p6[c(1:13, 16:19)]), confidence, evidence, notes) %>%
   group_by(plot_fiadb)
 
 n_distinct(prtly_forAndy$plot_fiadb)
@@ -420,7 +421,8 @@ un_p2 <- uncnfrmd %>%
   left_join(cond, by = c("plot_fiadb", "condid", "invyr")) %>%
   left_join(ForTypRef) %>%
   left_join(rename_all(cntyCds, tolower)) %>%
-  select(colnames(prtly_p6[c(1:13, 16:19)])) %>%
+  mutate(fireYrSrc = "", confidence = "", evidence = "", notes = "") %>%
+  select(colnames(prtly_p6[c(1:13, 16:19)]), confidence, evidence, notes) %>%
   group_by(plot_fiadb)
 
 write_csv(distinct(filter(un_p2, "1_Softwoods" %in% swhw)), "./data/forAndy/02_unconfirmed_SW.csv")

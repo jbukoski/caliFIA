@@ -102,8 +102,65 @@ sngl_l1 <- sngl_p1 %>%
 
 confSingles <- add_row(confSingles, sngl_l1)
   
-# Rule 2,
+# Rule 2, For plots with one fia fire, multiple perimeter fires, and one
+# perimeter fire is 5 or fewer years different from the fia fire, keep the
+# perimeter fire.
 
 sngl_p2 <- dat2process %>%
   filter(!(plot_fiadb %in% confSingles$plot_fiadb)) %>%
-  filter(n_fiafires == 1 & n_perimfires >= 1)
+  filter(n_fiafires == 1 & n_perimfires >= 1) %>%
+  mutate(diff = abs(fia_fire - perim_fire)) %>%
+  group_by(plot_fiadb) %>%
+  filter(diff == min(diff), perim_fire < measyear, diff <= 5) %>%
+  mutate(fireYrSrc = "PERIM",
+         fia_fire = perim_fire)
+
+sngl_l2 <- sngl_p2 %>%
+  select(colnames(confSingles[1:6])) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd_sngl",
+         confidence = 2,
+         evidence = "sngl rule 2 - if only 1 fia burn, more than 1 perim burn 
+         and the difference b/n the fia burn and one of the perim burns is <=
+         5 yrs, keep closest perimeter burn yr",
+         notes = NA)
+
+confSingles <- add_row(confSingles, sngl_l2)
+
+# Rule 3, if only 1 fia burn, more than 1 perim burn and the difference b/n
+# the fia burn and one of the perim burns is >5 & <= 10 yrs, keep closest 
+# perimeter burn year.
+
+sngl_p3 <- dat2process %>%
+  filter(!(plot_fiadb %in% confSingles$plot_fiadb)) %>%
+  filter(!is.na(perim_fire)) %>%
+  filter(perim_fire < measyear) %>%
+  mutate(diff = abs(fia_fire - perim_fire)) %>%
+  group_by(plot_fiadb) %>%
+  filter(diff == min(diff)) %>%
+  filter(diff <= 10) %>%
+  mutate(fireYrSrc = "PERIM",
+         fia_fire = perim_fire)
+
+sngl_l3 <- sngl_p3 %>%
+  select(colnames(confSingles[1:6])) %>%
+  unique() %>%
+  mutate(df = "prtly_cnfrmd_sngl",
+         confidence = 1,
+         evidence = "sngl rule 3 - if only 1 fia burn, more than 1 perim burn 
+         and the difference b/n the fia burn and one of the perim burns is >5 & 
+         <= 10 yrs, keep closest perimeter burn yr",
+         notes = NA)
+
+confSingles <- add_row(confSingles, sngl_l3)
+
+# Rule 4,
+
+sngl_p4 <- dat2process %>%
+  filter(!(plot_fiadb %in% confSingles$plot_fiadb))
+
+
+#--------------------------
+# Write out confirmed singles
+
+write_csv(confSingles, "./data/processed/conf_singles.csv")
