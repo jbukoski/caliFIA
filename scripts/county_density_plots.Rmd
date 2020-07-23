@@ -1,0 +1,132 @@
+---
+title: "county_density_plots"
+author: "Evan Patrick"
+date: "7/4/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Input a set of R5 plots from the FIADB and generate a heat map of plot density based on county. 
+
+```{r}
+# trouble installing XML package (needed for tmap) - run following code
+#install.packages("XML", type="binary")
+library(rFIA)
+library(RSQLite)
+library(tidyverse)
+library(sp)
+library(rgdal)
+library(rgeos)
+library(maptools)
+library(tmap)
+
+# Set working dir
+setwd("~/Summer 2020/FIA/rFIA")
+
+```
+
+Read in county shapefile
+
+```{r}
+CAcounty = readOGR("./data/ca-county-boundaries/CA_Counties/CA_Counties_TIGER2016.shp")
+
+```
+
+Get CountyFP from plots. First read in plot data, FIADB data, then join to get CountyFP
+
+```{r}
+# read in reburn plot data and filter out repeated plot entries
+confirmed_reburn_plots <- read.csv("./data/confirmed_plots.csv") %>% 
+  rename(PLOT = PLOT_FIADB) %>% distinct(PLOT, .keep_all = TRUE)
+
+# Get filename of db and read into SQLite 
+filename <- "./data/PNW_PUBLIC_SQLite.db"
+sqlite.driver <- dbDriver("SQLite")
+db <- dbConnect(sqlite.driver, dbname = filename)
+# pull out plot table from larger db
+pnwFIADBplot <- dbReadTable(db, "PLOT")
+# read condition plot table 
+pnwFIADBcond <- dbReadTable(db, "COND")
+
+# join reburn plot data with FIADB plot and condition tables
+plot_join <- confirmed_reburn_plots %>% left_join(pnwFIADBcond, by = "PLOT") %>%
+  distinct(PLOT, .keep_all = TRUE) 
+# filter out data that produced NAs, filter out duplicate plot entries
+plot_join_filt <- filter(plot_join, !is.na(PLOT), !is.na(COUNTYCD))
+
+# figure out which plots are missed 
+missed_plots <- anti_join(confirmed_reburn_plots, plot_join_filt, by = "PLOT") %>%
+  distinct(PLOT, .keep_all = TRUE)
+```
+
+Probably the best way to go about this is to add a column to the CAcounty@data which includes the count of plots within each county. 
+
+```{r}
+# create a list of county FP 
+CountyData <- CAcounty@data %>% as.data.frame()
+# CountyFP and CountyCD are different - need to add a column 
+# that converts to county name. Created COUNTYFP_CA.csv for this. 
+COUNTYCD_Name <- read.csv('./data/COUNTYCD_CA.csv')
+# join with plot_join_filt - we lose 6 plots here b/c COUNTYCD
+# does not line up with FIADB user guide
+plots_per_county <- plot_join_filt %>% add_count(COUNTYCD) %>% 
+  left_join(COUNTYCD_Name, by = "COUNTYCD") %>% filter(!is.na(NAME))
+CountyJoin <- CountyData %>% left_join(plots_per_county, by = 'NAME') %>%
+  distinct(NAME, .keep_all = TRUE)
+CountyJoin$n <- replace_na(CountyJoin$n, 0)
+# add 'n' column back to CAcounty data 
+CAcounty@data$n <- CountyJoin$n
+```
+
+Now plot the CA counties using n as color density
+
+```{r}
+
+# using tmap function qtm, you can display plot density easily
+qtm(CAcounty, "n", fill.n = 8)
+```
+
+Now to split up the data based on forest type and ownership
+
+```{r}
+# get forest type reference table from FIADB
+ForTypRef <- dbReadTable(db, "REF_FOREST_TYPE") %>% rename(FORTYPCD = REF_FORTYPCD)
+# recreated Ownership type reference table from FIADB User Guide
+OWNGRPCDref <- matrix(c(11, "National Forest.", 12, "National Grassland and/or Prairie.", 13, "Other Forest Service Land.", 21, "National Park Service.", 22, "Bureau of Land Management.", 23, "Fish and Wildlife Service.", 24, "Departments of Defense/Energy.", 25, "Other Federal.", 31, "State including State public universities.", 32, "Local (County, Municipality, etc.) including water authorities.", 33, "Other non-federal public.", 46, "Undifferentiated private and Native American."), ncol = 2, byrow = TRUE) %>% as.data.frame() %>% rename( "OWNCD" = "V1", "Description" = "V2") 
+OWNGRPCDref$OWNCD <- as.numeric(as.character(OWNGRPCDref$OWNCD))
+
+# join reference tables with plots_per_county
+plots_per_county_ref <- left_join(plots_per_county, ForTypRef, by = "FORTYPCD") %>%
+  left_join(OWNGRPCDref, by = "OWNCD") %>% filter(!is.na(SWHW))
+# this drops another 12 entries 
+
+
+# split into hardwood and softwood
+plots_per_county_hardwood <- filter(plots_per_county_ref, SWHW == "2_Hardwoods")
+plots_per_county_softwood <- filter(plots_per_county_ref, SWHW == "1_Softwoods")
+
+# get count of plots per county and add county name 
+ppc_hardwood_count <- plots_per_county_hardwood %>% add_count(COUNTYCD) 
+ppc_softwood_count <- plots_per_county_softwood %>% add_count(COUNTYCD) 
+  
+# join hardwood data with county data and add to CAcounty shapefile
+hardwoodCountyJoin <- CountyData %>% left_join(ppc_hardwood_count, by = 'NAME') %>%
+  distinct(NAME, .keep_all = TRUE)
+hardwoodCountyJoin$n <- replace_na(hardwoodCountyJoin$n, 0)
+CAcounty@data$hardwood_n <- hardwoodCountyJoin$n
+
+# join softwood data with county data and add to CAcounty shapefile
+softwoodCountyJoin <- CountyData %>% left_join(ppc_softwood_count, by = 'NAME') %>%
+  distinct(NAME, .keep_all = TRUE)
+softwoodCountyJoin$n <- replace_na(softwoodCountyJoin$n, 0)
+CAcounty@data$softwood_n <- softwoodCountyJoin$n
+
+# plot hardwood and softwood counts per county
+qtm(CAcounty, 'hardwood_n')
+qtm(CAcounty, 'softwood_n', fill.n = 9)
+
+```
+
