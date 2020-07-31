@@ -22,7 +22,7 @@ plot <- rename_all(dbReadTable(db, "PLOT"), tolower)
 cond <- rename_all(dbReadTable(db, "COND"), tolower)
 tree <- dbReadTable(db, "Tree")
 seedling <- rename_all(dbReadTable(db, "SEEDLING"), tolower)
-
+  
 dbDisconnect(db)
 
 #------------------------------------------
@@ -50,7 +50,7 @@ rbrn_trees <- reburns %>%
  
 rbrn_trees %>%
   View
-
+  
 
 
 
