@@ -9,10 +9,7 @@ library(tidyverse)
 # Unzip password protected databases via terminal
 
 # cd /media/jbukoski/9E25-21B8/cafia
-# unzip LinkConf.zip
-# unzip AnnualData.zip
-# unzip CA_occ2_3.zip
-# unzip r5_tag_num.zip
+# unzip fia_data.zip
 
 #----------------------------
 # Specify SQL driver and paths to databases
@@ -105,11 +102,8 @@ dbDisconnect(db)
 # Remove confidential databases from the flashdrive
 # Run following lines uncommented in the terminal
 
-# cd /media/jbukoski/9E25-21B8/cafia
-# rm LinkConf.db
-# rm AnnualData.db
-# rm CA_occ2_3.db
-# rm r5_tag_num.db
+
+# rm *.db
 
 #--------------------------------
 # Clean up environment a bit
@@ -126,6 +120,19 @@ names(annTables)  # Annual FIA data
 names(prdcTables)  # Periodic FIA data
 names(r5Tables)  # Region 5 FIA data
 
+# Load in list of confirmed single burn and reburn plots
+
+singles <- read_csv("./data/processed/conf_singles.csv") %>%
+  mutate(burn = "single")
+reburns <- read_csv("./data/processed/conf_reburns.csv") %>%
+  mutate(burn = "reburn")
+
+conf_plts <- bind_rows(singles, reburns)
+
+n_distinct(conf_plts$plot_fiadb)
+
+# 1114 confirmed plots with single burns or reburns
+
 #-------------------------------
 # Linking the region 5 data
 
@@ -136,6 +143,7 @@ names(r5Tables)  # Region 5 FIA data
 
 r5_linkData <- linkTable$LINK_CONF %>%
   filter(!is.na(R5)) %>%
+  filter(PLOT_FIADB %in% conf_plts$plot_fiadb) %>%
   mutate(FORE = NFS_ADFORCD - 500,
          R5_PLT_ID = ifelse(NFS_PLT_NUM_PNWRS < 100000, 
                             NFS_PLT_NUM_PNWRS - (FORE * 1000), 
@@ -143,11 +151,45 @@ r5_linkData <- linkTable$LINK_CONF %>%
   select(BURN_CLASS:NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID, 
          PERIODIC_PLOT_NBR_PNWRS:OAK_DEATH_PLOT_YN)
 
-# Link on both FORE & PLOT
+n_distinct(r5_linkData$PLOT_FIADB)
+
+# 205 confirmed plots supposedly with R5 plot match.
+
+# Link on both FORE & PLOT - can add PLOT_FIADB to the R5_VEG_DATA_ALL df
 
 r5_linkData %>%
-  select(STATECD, COUNTYCD, PLOT_FIADB, FORE, R5_PLT_ID) %>%
-  left_join(r5Tables$R5_VEGETATION_DATA_ALL, by = c("FORE", "R5_PLT_ID" = "PLOT"))
+  select(STATECD, COUNTYCD, PLOT_FIADB, NFS_ADFORCD, NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID) %>%
+  anti_join(r5Tables$R5_VEGETATION_DATA_ALL, by = c("FORE", "R5_PLT_ID" = "PLOT")) %>%
+  arrange(FORE, R5_PLT_ID) %>%
+  pull(PLOT_FIADB) %>%
+  unique() %>%
+  length()
+
+# 55 confirmed plots that do not link to the R5_VEG_DATA_ALL table, not quite sure why
+
+
+
+r5_linkData %>%
+  select(STATECD, COUNTYCD, PLOT_FIADB, NFS_ADFORCD, NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID) %>%
+  anti_join(r5Tables$`R5 LIST OF CONDITIONS AND PLOTS IN IDB`, by = c("NFS_ADFORCD" = "FOREST_OR_BLM_DISTRICT", "R5_PLT_ID" = "PLOT")) %>%
+  arrange(FORE, R5_PLT_ID)
+
+
+r5Tables$R5_VEGETATION_DATA_ALL %>%
+  filter(FORE == 1) %>%
+  pull(PLOT) %>%
+  unique() %>%
+  sort()
+
+# 
+# 32021 rows with a left_join
+# 154 rows without a match (out of 589 original rows)
+
+linkTable$LINK_CONF %>% 
+  filter(ANNUAL_PLOT == "Y" & PERIODIC_PLOT == "Y") %>%
+  pull(PLOT_FIADB) %>%
+  unique() %>%
+  length()
 
 
 r5Tables$`R5 LIST OF CONDITIONS AND PLOTS IN IDB` %>%
