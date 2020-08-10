@@ -157,7 +157,7 @@ prtly_list2 <- prtly_p2 %>%
 
 prtly_p3a <- prtly_cnfrmd %>%
   filter(!(plot_fiadb %in% confirmed$plot_fiadb)) %>%
-  filter(n_fiafires == 2 & n_perimfires == 2) %>% View
+  filter(n_fiafires == 2 & n_perimfires == 2) %>%
   group_by(plot_fiadb) %>%
   mutate(n_perimfires = n_distinct(perim_fire),
          dstnc_minFireYr = abs(min(fia_fire) - min(perim_fire))) %>%

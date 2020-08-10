@@ -22,10 +22,13 @@ db_plot_lb <- dbReadTable(db, "PlotLevelFireDisturbPNWFromAnnualVisitLookbacks")
   rename_all(tolower)
 
 all_plots_list <- dbReadTable(db, "ALL_PLOTS_LIST_w_EvidenceSource")
-ag_fixed_fire <- rename_all(dbReadTable(db, "AG_FIXED_FIRE_YRS_To_1960_forested_ever"), tolower)
+
 xtra_plts <- dbReadTable(db, "ExtraDistPltsFromAGfix")     # Additional 10 plots
 plot <- rename_all(dbReadTable(db, "PLOT"), tolower)
 cond <- rename_all(dbReadTable(db, "COND"), tolower)
+
+ag_fixed_fire <- rename_all(dbReadTable(db, "AG_FIXED_FIRE_YRS_To_1960_forested_ever"), tolower) %>%
+  left_join(select(plot, plot_fiadb, measyear, invyr))
 
 dbDisconnect(db)
 
@@ -55,7 +58,7 @@ cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, cols(CNTY_NAME = co
 full_plot_list <- db_cond_lb %>%
   rename(fia_fire = dstrbyr1, anncd = dstrbcd1) %>% 
   mutate(inventory = NA, oc = NA) %>%
-  select(statecd, plot_fiadb, inventory, oc, measyear, condid, fia_fire, anncd, intensity) %>%
+  select(statecd, plot_fiadb, inventory, oc, invyr, measyear, condid, fia_fire, anncd, intensity) %>%
   bind_rows(filter(select(ag_fixed_fire, -anntxt), inventory != "Annual")) %>%
   filter(fia_fire >= 1960) %>%
   left_join(perimDat, by = "plot_fiadb") %>%
@@ -95,7 +98,7 @@ jjb_fixed_plts <- db_cond_lb %>%
   ungroup() %>%
   mutate(inventory = "Annual", oc = NA, intensity = "1") %>%
   rename(disturbyr = dstrbyr1, anncd = dstrbcd1) %>%
-  select(statecd, plot_fiadb, inventory, oc, measyear, condid, disturbyr, anncd, intensity) %>%
+  select(statecd, plot_fiadb, inventory, invyr, oc, measyear, condid, disturbyr, anncd, intensity) %>%
   distinct() %>%
   group_by(plot_fiadb) %>%
   mutate(n_dstrbyr = n_distinct(disturbyr)) %>%
@@ -109,7 +112,7 @@ jjb_fixed_plts <- db_cond_lb %>%
 dat2join <- db_cond_lb %>%
   mutate(inventory = "Annual", oc = NA, intensity = "1") %>%
   rename(disturbyr = dstrbyr1, anncd = dstrbcd1) %>%
-  select(statecd, plot_fiadb, inventory, oc, measyear, condid, disturbyr, anncd, intensity)
+  select(statecd, plot_fiadb, inventory, oc, invyr, measyear, condid, disturbyr, anncd, intensity)
   
 # Join the ag_fixed fire plots - those that were adjusted above, the adjusted
 # plots from above, and all records with measurement years greater than or

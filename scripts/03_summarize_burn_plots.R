@@ -36,13 +36,10 @@ sngls_jnd <- singles %>%
   left_join(cntyCds) %>%
   select(cols, countycd, cnty_name, fortypcd, swhw, owngrpcd)
 
-sngls_jnd
-
 sngls_jnd %>%
   group_by(owngrpcd, swhw) %>%
   summarize(n_plts = n_distinct(plot_fiadb)) %>%
-  arrange(swhw, owngrpcd, -n_plts) %>%
-  View
+  arrange(swhw, owngrpcd, -n_plts)
 
 #-----------------------
 # Reburn plots

@@ -127,7 +127,8 @@ singles <- read_csv("./data/processed/conf_singles.csv") %>%
 reburns <- read_csv("./data/processed/conf_reburns.csv") %>%
   mutate(burn = "reburn")
 
-conf_plts <- bind_rows(singles, reburns)
+conf_plts <- bind_rows(singles, reburns) %>%
+  rename_all(toupper)
 
 n_distinct(conf_plts$plot_fiadb)
 
@@ -166,52 +167,56 @@ r5_linkData %>%
   length()
 
 # 55 confirmed plots that do not link to the R5_VEG_DATA_ALL table, not quite sure why
+  
 
+prePost <- conf_plts %>%
+  left_join(select(linkTable$LINK_CONF, PLOT_FIADB, ANNUAL_PLOT, R5, PERIODIC_PLOT)) %>%     # Join link table data to see what plots will have prefire data and postfire data
+  group_by(PLOT_FIADB) %>%
+  filter(INVYR < 2019) %>%
+  mutate(pre_fire = ifelse((max(FIA_FIRE) > 1995 & min(MEASYEAR) < max(FIA_FIRE)) |(max(FIA_FIRE) > 1995 & PERIODIC_PLOT == "Y"), "Y", "N"),
+         post_fire = ifelse(max(MEASYEAR) > max(FIA_FIRE), "Y", "N"))
 
+prePost %>%
+  filter(pre_fire == "Y" & post_fire == "Y") %>%
+  filter(ANNUAL_PLOT == "Y" & PERIODIC_PLOT == "N") %>%
+  group_by(BURN) %>%
+  summarize(n = n_distinct(PLOT_FIADB))
 
-r5_linkData %>%
-  select(STATECD, COUNTYCD, PLOT_FIADB, NFS_ADFORCD, NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID) %>%
-  anti_join(r5Tables$`R5 LIST OF CONDITIONS AND PLOTS IN IDB`, by = c("NFS_ADFORCD" = "FOREST_OR_BLM_DISTRICT", "R5_PLT_ID" = "PLOT")) %>%
-  arrange(FORE, R5_PLT_ID)
+#--------------------------------------------------------
+########################################
+## Calculate biomass in annual tables ##
+########################################
 
+# Just summing by plot, inventory year, and visit
 
-r5Tables$R5_VEGETATION_DATA_ALL %>%
-  filter(FORE == 1) %>%
-  pull(PLOT) %>%
-  unique() %>%
-  sort()
+dat <- conf_plts %>%
+  left_join(annTables$TREE, by = c("PLOT_FIADB", "CONDID", "INVYR")) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(visit = ifelse(max(FIA_FIRE) < MEASYEAR, "POST", "PRE")) %>%
+  select(BURN, PLOT_FIADB:FIA_FIRE, visit, DIA:CARBON_AG) %>%
+  filter(BURN == "reburn") %>%
+  group_by(PLOT_FIADB, INVYR, visit) %>%
+  summarize(carbon = sum(CARBON_AG, na.rm = T)) %>%
+  arrange(PLOT_FIADB, INVYR) %>%
+  group_by(PLOT_FIADB) %>%
+  filter(!any(is.na(INVYR))) %>%
+  mutate(change = max(carbon) - min(carbon)) %>%
+  pivot_wider(names_from = visit, values_from = c(carbon)) %>%
+  select(PLOT_FIADB, PRE, POST)
 
-# 
-# 32021 rows with a left_join
-# 154 rows without a match (out of 589 original rows)
+dat2 <- dat %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(PRE = max(PRE, na.rm = T),
+         POST = max(POST, na.rm = T),
+         diff = (POST - PRE) / PRE * 100) %>%
+  drop_na(diff) %>%
+  filter(is.finite(diff)) %>%
+  filter(abs(diff) < 1000)
 
-linkTable$LINK_CONF %>% 
-  filter(ANNUAL_PLOT == "Y" & PERIODIC_PLOT == "Y") %>%
-  pull(PLOT_FIADB) %>%
-  unique() %>%
-  length()
+# Most of the difference values are within -100 to 0 (i.e., a loss of live
+# biomass from pre to post fire)
 
-
-r5Tables$`R5 LIST OF CONDITIONS AND PLOTS IN IDB` %>%
-  filter(FOREST_OR_BLM_DISTRICT == 511) %>%
-  pull(CNTY) %>%
-  unique()
-
-colnames(r5Tables$`R5 LIST OF CONDITIONS AND PLOTS IN IDB`)
-
-
-
-linkTable$LINK_CONF %>%
-  filter(PLOT_FIADB %in% r5Tables$R5_VEGETATION_DATA_ALL$PLOT)
-
-annTables[["PLOT"]] %>%
-  filter(PLOT_FIADB %in% r5Tables[["R5 LIST OF CONDITIONS AND PLOTS IN IDB"]]$PLOT_ID)
-
-# Can link to CA91 periodic inventories using PLOT_FIADB
-
-linkTable[["LINK_CONF"]] %>%
-  filter(PLOT_FIADB %in% prdcTables[["CA81_TREE"]]$PLOT_FIADB) %>%
-  View
-
-
+ggplot(dat2) +
+  geom_point(aes(x = diff, y = PLOT_FIADB)) +
+  theme_bw()
 
