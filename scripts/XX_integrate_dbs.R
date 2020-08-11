@@ -193,20 +193,22 @@ dat <- conf_plts %>%
   left_join(annTables$TREE, by = c("PLOT_FIADB", "CONDID", "INVYR")) %>%
   group_by(PLOT_FIADB) %>%
   mutate(visit = ifelse(max(FIA_FIRE) < MEASYEAR, "POST", "PRE")) %>%
-  select(BURN, PLOT_FIADB:FIA_FIRE, visit, DIA:CARBON_AG) %>%
+  select(BURN, PLOT_FIADB:FIA_FIRE, visit, DIA:CARBON_AG) %>%  
   filter(BURN == "reburn") %>%
   group_by(PLOT_FIADB, INVYR, visit) %>%
-  summarize(carbon = sum(CARBON_AG, na.rm = T)) %>%
+  summarize(carbon = sum(CARBON_AG * TPA_UNADJ * 0.453592, na.rm = T),  # CARBON_AG is in lbs (p 193 of FIA v 8.0), 0.45... converts to kg 
+            c_mgha = carbon / 0.404686 / 1000) %>%    # Converts from per Acre to per ha
   arrange(PLOT_FIADB, INVYR) %>%
   group_by(PLOT_FIADB) %>%
   filter(!any(is.na(INVYR))) %>%
-  mutate(change = max(carbon) - min(carbon)) %>%
-  pivot_wider(names_from = visit, values_from = c(carbon)) %>%
+  mutate(change = max(c_mgha) - min(c_mgha)) %>%
+  pivot_wider(names_from = visit, values_from = c(c_mgha)) %>%
   select(PLOT_FIADB, PRE, POST)
 
 dat2 <- dat %>%
   group_by(PLOT_FIADB) %>%
-  mutate(PRE = max(PRE, na.rm = T),
+  mutate(PLOT_FIADB_FCT = factor(PLOT_FIADB),
+         PRE = max(PRE, na.rm = T),
          POST = max(POST, na.rm = T),
          diff = (POST - PRE) / PRE * 100) %>%
   drop_na(diff) %>%
@@ -215,8 +217,41 @@ dat2 <- dat %>%
 
 # Most of the difference values are within -100 to 0 (i.e., a loss of live
 # biomass from pre to post fire)
-
-ggplot(dat2) +
-  geom_point(aes(x = diff, y = PLOT_FIADB)) +
+dat2 %>%
+  mutate(pt_col = diff > 0) %>%
+  ggplot() +
+  geom_point(aes(x = diff, y = PLOT_FIADB_FCT, col = as.factor(pt_col))) +
   theme_bw()
+
+#---------------------------------------------
+##########################################
+## Calculate biomass in periodic tables ##
+##########################################
+
+# DBH3 - dbh of current inventory in mm (CA91)
+# INV3_ABV_GRND_WB_TR	- Above ground woody biomass at the current inventory (kg / tree)
+
+test <- prdcTables$CA91_TREE_CRRNT %>%
+  left_join(prdcTables$CA91_TREE, by = c("PLOT_FIADB", "LINE")) %>%
+  #filter(DBH3 >= 25.4) %>%   # Filter to records that are greater than 1" DBH, match annual
+  group_by(PLOT_FIADB) %>%
+  summarize(c_mgha = sum(INV3_ABV_GRND_WB_AC / 0.404686 / 1000, na.rm = T)) %>%   # INV3_ABV_GRND_WB_AC is in kg/acre, convert to MG/ha here
+  View
+
+prdcTables$CA91_TREE_CRRNT %>%
+  filter(PLOT_FIADB == 59237) %>%
+  select(PLOT_FIADB, BURN_CLASS, INV3_ABV_GRND_WB_AC) %>%
+  View
+
+# 225 periodic plots that link to annual plots - slightly less for single.
+# Question is how many single plots do we have pre- and post-fire data for
+
+conf_plts %>%
+  filter(BURN == "single") %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n_invyr = n_distinct(INVYR)) %>%
+  filter(n_invyr > 1) %>%
+  mutate(VISIT = ifelse(MEASYEAR < FIA_FIRE, "PRE", "POST")) %>%
+  View
+
 
