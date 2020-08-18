@@ -27,7 +27,7 @@ cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T,
 
 # Load in the table of single burn plots
 
-singles <- read_csv("./data/processed/singles.csv") %>%
+singles <- read_csv("./data/processed/singles2.csv") %>%
   mutate(intensity = as.character(intensity))
 
 #--------------------------
@@ -48,7 +48,7 @@ dat2process <- singles %>%
          fia_fire, perim_fire, fers_fire, n_fiafires, n_perimfires, 
          n_fersfires, match, n_match, countycd, fortypcd, owngrpcd, swhw)
 
-# 1844 candidate single burn plots
+# 1818 candidate single burn plots, was 1844 before August update
 n_distinct(dat2process$plot_fiadb)
 
 #------------------------------------------
@@ -159,8 +159,22 @@ confSingles <- add_row(confSingles, sngl_l3)
 sngl_p4 <- dat2process %>%
   filter(!(plot_fiadb %in% confSingles$plot_fiadb))
 
+#--------------------------
+# Get final confirmed / unconfirmed plot counts
+
+# Total of 688 unconfirmed single burn plots
+n_distinct(sngl_p4$plot_fiadb)
+
+# Total of 1130 confirmed single burn plots
+n_distinct(confSingles$plot_fiadb)
 
 #--------------------------
 # Write out confirmed singles
 
 write_csv(confSingles, "./data/processed/conf_singles.csv")
+
+#--------------------------
+# Clean up
+
+rm(list = ls())
+

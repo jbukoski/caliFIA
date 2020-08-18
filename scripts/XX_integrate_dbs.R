@@ -130,7 +130,7 @@ reburns <- read_csv("./data/processed/conf_reburns.csv") %>%
 conf_plts <- bind_rows(singles, reburns) %>%
   rename_all(toupper)
 
-n_distinct(conf_plts$plot_fiadb)
+n_distinct(conf_plts$PLOT_FIADB)
 
 # 1114 confirmed plots with single burns or reburns
 
@@ -144,7 +144,7 @@ n_distinct(conf_plts$plot_fiadb)
 
 r5_linkData <- linkTable$LINK_CONF %>%
   filter(!is.na(R5)) %>%
-  filter(PLOT_FIADB %in% conf_plts$plot_fiadb) %>%
+  #filter(PLOT_FIADB %in% conf_plts$plot_fiadb) %>%
   mutate(FORE = NFS_ADFORCD - 500,
          R5_PLT_ID = ifelse(NFS_PLT_NUM_PNWRS < 100000, 
                             NFS_PLT_NUM_PNWRS - (FORE * 1000), 
@@ -158,13 +158,12 @@ n_distinct(r5_linkData$PLOT_FIADB)
 
 # Link on both FORE & PLOT - can add PLOT_FIADB to the R5_VEG_DATA_ALL df
 
-r5_linkData %>%
-  select(STATECD, COUNTYCD, PLOT_FIADB, NFS_ADFORCD, NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID) %>%
+forKama <- r5_linkData %>%
+  select(STATECD, COUNTYCD, PLOT_FIADB, NFS_ADFORCD, NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID, MEASYEAR, MEASMON, MEASDAY) %>%
   anti_join(r5Tables$R5_VEGETATION_DATA_ALL, by = c("FORE", "R5_PLT_ID" = "PLOT")) %>%
-  arrange(FORE, R5_PLT_ID) %>%
-  pull(PLOT_FIADB) %>%
-  unique() %>%
-  length()
+  arrange(FORE, R5_PLT_ID)
+
+write_csv(forKama, "~/Desktop/plots_forKama.csv")
 
 # 55 confirmed plots that do not link to the R5_VEG_DATA_ALL table, not quite sure why
   
@@ -225,6 +224,7 @@ biomass91 <- prdcTables$CA91_TREE_CRRNT %>%
   summarize(c_mgha = sum(INV3_ABV_GRND_WB_AC / 0.404686 / 1000, na.rm = T)) %>%  # INV3_ABV_GRND_WB_AC is in kg/acre, convert to MG/ha here
   mutate(visit = "PRE", INVYR = 1991)
 
+colnames(prdcTables$CA81_TREE_REF)
 
 annl_w_prdc <- dat %>% 
   select(-carbon) %>%
@@ -280,21 +280,36 @@ dat4stats %>%
   ylab("Biomass C (Mg/ha)") +
   xlab("Burn Class")
 
-dat4stats %>%
-  filter(perc_diff < 0) %>%
+forTypRef <- read_csv("./data/processed/forestTypeRef.csv")
+
+plt_types <- annTables$COND %>%
+  as.data.frame() %>%
+  select(STATECD, PLOT_FIADB, CONDID, INVYR, OWNGRPCD, FORTYPCD) %>%
+  left_join(forTypRef, by = c("FORTYPCD" = "fortypcd")) %>%
+  select(STATECD:FORTYPCD, SWHW = swhw)
+
+swhw_dat <- dat4stats %>%
+  left_join(plt_types) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  filter(perc_diff < 1000)
+
+swhw_dat %>%
   ggplot() +
   facet_grid(. ~ BURN) +
-  geom_histogram(aes(perc_diff))
+  geom_histogram(aes(perc_diff)) +
+  theme_bw()
 
-mdl1 <- glm(POST ~ BURN + PRE, data = dat4stats)
+mdl1 <- glm(POST ~ BURN + PRE, data = swhw_dat)
 
 summary(mdl1)
 
-dat2plt %>%
+swhw_dat %>%
   filter(!is.na(perc_diff) & perc_diff < 0) %>%
   group_by(BURN) %>%
   summarize(avg_diff = mean(perc_diff, na.rm = T),
             sdv_diff = sd(perc_diff, na.rm = T)) %>% View
+
+summary(aov(perc_diff ~ BURN, data = swhw_dat))
 
 # 225 periodic plots that link to annual plots - slightly less for single.
 # Question is how many single plots do we have pre- and post-fire data for
