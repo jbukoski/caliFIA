@@ -98,6 +98,16 @@ r5Tables <- getTables(db, r5Tables)
 
 dbDisconnect(db)
 
+#-----------------------
+# Read in IDB
+
+db <- dbConnect(sqlite.driver, dbname = "/media/jbukoski/9E25-21B8/cafia/IDB_2005_PUB.DB3")
+dbListTables(db)
+
+idbTables <- list()
+idbTables <- getTables(db, idbTables)
+
+
 #---------------------------------
 # Remove confidential databases from the flashdrive
 # Run following lines uncommented in the terminal
@@ -152,7 +162,29 @@ r5_linkData <- linkTable$LINK_CONF %>%
   select(BURN_CLASS:NFS_PLT_NUM_PNWRS, FORE, R5_PLT_ID, 
          PERIODIC_PLOT_NBR_PNWRS:OAK_DEATH_PLOT_YN)
 
-n_distinct(r5_linkData$PLOT_FIADB)
+r5plts <- r5_linkData %>%
+  select(PLOT_FIADB, NFS_ADFORCD, R5_PLT_ID) %>%
+  distinct()
+
+library(lubridate)
+
+r5biom <- r5plts %>%
+  left_join(idbTables$PLOT, by = c("NFS_ADFORCD" = "FOREST_OR_BLM_DISTRICT", "R5_PLT_ID" = "PLOT")) %>%
+  left_join(idbTables$TREE_LIVE) %>%
+  filter(DBH_IN >= 1) %>%
+  select(PLOT_FIADB, NFS_ADFORCD, PLOT = R5_PLT_ID, ALLTREE_ID, ASSESSMENT_DATE, BIOM_AC_ABV_GRND_TON) %>%
+  mutate(INVYR = as.numeric(format(as.Date(ASSESSMENT_DATE, format = "%m/%d/%Y"), "%Y"))) %>%
+  group_by(PLOT_FIADB, INVYR) %>%
+  mutate(c_mgha = sum(BIOM_AC_ABV_GRND_TON, na.rm = T) * 2.47 * 0.5) %>%
+  select(PLOT_FIADB, INVYR, c_mgha) %>% # Convert to tons per ha
+  distinct() %>%
+  left_join(select(conf_plts, PLOT_FIADB, FIA_FIRE)) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(visit = ifelse(INVYR > max(FIA_FIRE), "POST", "PRE"))
+
+r5_linkData %>%
+  select(PLOT_FIADB, FORE, R5_PLT_ID) %>%
+  left_join(r5Tables$R5_VEGETATION_DATA_ALL, by = c("FORE", "R5_PLT_ID" = "PLOT" ))
 
 # 205 confirmed plots supposedly with R5 plot match.
 
@@ -163,10 +195,10 @@ forKama <- r5_linkData %>%
   anti_join(r5Tables$R5_VEGETATION_DATA_ALL, by = c("FORE", "R5_PLT_ID" = "PLOT")) %>%
   arrange(FORE, R5_PLT_ID)
 
-write_csv(forKama, "~/Desktop/plots_forKama.csv")
+#write_csv(forKama, "~/Desktop/plots_forKama.csv")
 
 # 55 confirmed plots that do not link to the R5_VEG_DATA_ALL table, not quite sure why
-  
+
 
 prePost <- conf_plts %>%
   left_join(select(linkTable$LINK_CONF, PLOT_FIADB, ANNUAL_PLOT, R5, PERIODIC_PLOT)) %>%     # Join link table data to see what plots will have prefire data and postfire data
@@ -186,8 +218,6 @@ prePost %>%
 ## Calculate biomass in annual tables ##
 ########################################
 
-library(lubridate)
-
 # Just summing by plot, inventory year, and visit
 
 dat <- conf_plts %>%
@@ -198,7 +228,9 @@ dat <- conf_plts %>%
   group_by(PLOT_FIADB, INVYR, visit) %>%
   summarize(carbon = sum(CARBON_AG * TPA_UNADJ * 0.453592, na.rm = T),  # CARBON_AG is in lbs (p 193 of FIA v 8.0), 0.45... converts to kg 
             c_mgha = carbon / 0.404686 / 1000) %>%    # Converts from per Acre to per ha
-  arrange(PLOT_FIADB, INVYR)
+  arrange(PLOT_FIADB, INVYR) %>%
+  select(-carbon)
+
 
 # Most of the difference values are within -100 to 0 (i.e., a loss of live
 # biomass from pre to post fire)
@@ -222,13 +254,22 @@ biomass91 <- prdcTables$CA91_TREE_CRRNT %>%
   filter(DBH3 >= 25.4) %>%   # Filter to records that are greater than 1" DBH, match annual
   group_by(PLOT_FIADB) %>%
   summarize(c_mgha = sum(INV3_ABV_GRND_WB_AC / 0.404686 / 1000, na.rm = T)) %>%  # INV3_ABV_GRND_WB_AC is in kg/acre, convert to MG/ha here
-  mutate(visit = "PRE", INVYR = 1991)
+  left_join(select(conf_plts, PLOT_FIADB, FIA_FIRE)) %>%
+  mutate(INVYR = 1991,
+         visit = ifelse(FIA_FIRE > 1991, "PRE", "POST")) %>%
+  group_by(PLOT_FIADB) %>%
+  filter("PRE" %in% visit) %>%
+  ungroup() %>%
+  arrange(PLOT_FIADB) %>%
+  select(-FIA_FIRE) %>%
+  filter(visit == "PRE") %>%
+  distinct()
 
 colnames(prdcTables$CA81_TREE_REF)
 
 annl_w_prdc <- dat %>% 
-  select(-carbon) %>%
   bind_rows(biomass91) %>%
+  bind_rows(r5biom) %>%
   arrange(PLOT_FIADB, INVYR) %>% 
   left_join(select(conf_plts, PLOT_FIADB, INVYR, BURN, FIRE = FIA_FIRE)) %>% 
   filter(!is.na(INVYR)) %>%
@@ -247,7 +288,6 @@ annl_w_prdc <- dat %>%
   filter(("PRE" %in% VISIT) & ("POST" %in% VISIT)) %>%
   ungroup()
 
-
 dat2plt <- annl_w_prdc %>%
   group_by(PLOT_FIADB) %>%
   arrange(PLOT_FIADB, YEAR) %>%
@@ -255,10 +295,35 @@ dat2plt <- annl_w_prdc %>%
          perc_diff = ifelse((c_mgha != diff), 100 * diff / (first(na.omit(c_mgha)) + 0.00000001), 0),
          perc_diff = ifelse(!is.finite(perc_diff), NA, perc_diff)) %>%
   ungroup()
-  
+
+
+timeSncFire <- dat2plt %>%
+  select(PLOT_FIADB, VISIT, YEAR) %>%
+  filter(VISIT == "FIRE") %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(RCNT_FIRE = max(YEAR)) %>%
+  select(PLOT_FIADB, RCNT_FIRE) %>%
+  left_join(select(dat2plt, PLOT_FIADB, VISIT, YEAR)) %>%
+  filter(VISIT == "POST") %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(POST_VST = max(YEAR)) %>%
+  select(PLOT_FIADB, RCNT_FIRE, POST_VST) %>%
+  left_join(select(dat2plt, PLOT_FIADB, VISIT, YEAR)) %>%
+  filter(VISIT == "PRE") %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(PRE_VST = max(YEAR)) %>%
+  mutate(TimeSinceFire = POST_VST - RCNT_FIRE,
+         TimeBeforeFire = RCNT_FIRE - PRE_VST) %>%
+  select(PLOT_FIADB, TimeSinceFire, TimeBeforeFire)
+
+dat2plt %>%
+  left_join(timeSncFire) %>%
+  distinct() %>%
+  View
+
 #---------------------------------
 # Early modeling
-
+  
 library(lme4)
 
 dat4stats <- dat2plt %>%
@@ -288,40 +353,11 @@ plt_types <- annTables$COND %>%
   left_join(forTypRef, by = c("FORTYPCD" = "fortypcd")) %>%
   select(STATECD:FORTYPCD, SWHW = swhw)
 
+#------------------------------
+# Final data frame, write out results for now.
+
 swhw_dat <- dat4stats %>%
   left_join(plt_types) %>%
-  filter("1_Softwoods" %in% SWHW) %>%
-  filter(perc_diff < 1000)
+  left_join(timeSncFire)
 
-swhw_dat %>%
-  ggplot() +
-  facet_grid(. ~ BURN) +
-  geom_histogram(aes(perc_diff)) +
-  theme_bw()
-
-mdl1 <- glm(POST ~ BURN + PRE, data = swhw_dat)
-
-summary(mdl1)
-
-swhw_dat %>%
-  filter(!is.na(perc_diff) & perc_diff < 0) %>%
-  group_by(BURN) %>%
-  summarize(avg_diff = mean(perc_diff, na.rm = T),
-            sdv_diff = sd(perc_diff, na.rm = T)) %>% View
-
-summary(aov(perc_diff ~ BURN, data = swhw_dat))
-
-# 225 periodic plots that link to annual plots - slightly less for single.
-# Question is how many single plots do we have pre- and post-fire data for
-
-conf_plts
-
-conf_plts %>%
-  filter(BURN == "single") %>%
-  group_by(PLOT_FIADB) %>%
-  mutate(n_invyr = n_distinct(INVYR)) %>%
-  filter(n_invyr > 1) %>%
-  mutate(VISIT = ifelse(MEASYEAR < FIA_FIRE, "PRE", "POST")) %>%
-  View
-
-
+write_csv(swhw_dat, "./data/processed/conf_plots_biomass.csv")

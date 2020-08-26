@@ -1,0 +1,282 @@
+---
+title: "Preliminary Analyses"
+author: "Jacob Bukoski"
+date: "8/25/2020"
+output: html_document
+---
+
+```{r, echo = FALSE, message = FALSE}
+library(tidyverse)
+library(ggthemes)
+```
+
+
+## Update on FIA work - August 25, 2020
+
+</br>
+
+  1. Gathered data for single burn and reburn plots from the periodic inventories, the R5 inventories and the annual inventories (with a ton of Jeremy's help - thank you!)
+  2. Began linking the data and trying to calculate biomass to begin looking at effects and differences in data
+  3. Lost a lot of plots due to the absence of either a pre- or post-fire measurement, mostly the pre-fire measurements
+  4. For reburn plots
+      * Most pre-fire measurements come from periodic 1990s database
+  5. For single burn plots
+      - Most pre-fire measurements come from R5 database. Very few pre-burn visits were found in the annual data - most are post-fire.
+  6. Have calculated biomass for the plots that are available, took some time to understand different designs and identify different variables
+      - Calculating biomass estimate from each plot in Mg C ha^-1
+      - Filtered all tree records to just those that were > 1 in diameter (to align periodic and R5 with annual)
+  7. For plots with pre-burn and post-burn measurements of biomass, we had:
+      - 154 reburn plots (78 softwood, 87 hardwood)
+      - 161 single burn plots (98 softwood, 78 hardwood)
+  8. Calculated:
+      - pre-fire biomass (Mg C ha-1)
+      - post-fire biomass (Mg C ha-1)
+      - percent change (100 * (post - pre / pre))
+      - Post-Fire to Burn time (yrs)
+      - Burn to Pre-Fire time (yrs)
+  9. Things get a bit wonky with the percent change, so I was looking at things in terms of loss (i.e., precent change > -100 & < 0) and gain (percent change > 0)
+
+</br>
+
+```{r, echo = FALSE, message = FALSE} 
+
+raw_dat <- read_csv("~/Dropbox/manuscripts/caliFIA/analysis/data/processed/conf_plots_biomass.csv")
+
+# Calculate how many reburn and single plots we have pre and post-fire data for.
+
+counts <- raw_dat %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  ungroup() %>%
+  group_by(BURN) %>%
+  summarize( n = n_distinct(PLOT_FIADB) )
+
+```
+
+### Difference in mean loss by burn type
+
+</br>
+
+First for plots that exhibited losses in biomass. Perhaps a significant difference...
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+
+raw_dat %>%
+  filter(perc_diff < 0) %>%
+  select(PLOT_FIADB, BURN, perc_diff) %>%
+  distinct() %>%
+  group_by(BURN) %>%
+  summarize(diff_avg = mean(perc_diff),
+            diff_se = plotrix::std.error(perc_diff))
+
+```
+
+</br>
+
+Now for plots that exhibited gains in biomass.
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+
+raw_dat %>%
+  filter(perc_diff > 0) %>%
+  select(PLOT_FIADB, BURN, perc_diff) %>%
+  distinct() %>%
+  group_by(BURN) %>%
+  summarize(diff_avg = mean(perc_diff),
+            diff_se = plotrix::std.error(perc_diff))
+
+```
+
+</br>
+
+### Plotting histograms of the percent differences by burn class
+
+</br>
+
+Doesn't seem to be much visual difference?
+
+```{r, echo = F, warning = F, message = F}
+
+raw_dat %>%
+  group_by("PLOT_FIADB") %>%
+  #filter("1_Softwoods" %in% SWHW) %>%
+  ungroup() %>%
+  select(BURN, perc_diff) %>%
+  distinct() %>%
+  ggplot() +
+  facet_grid(. ~ BURN) +
+  geom_histogram(aes(perc_diff), bins = 16) +
+  xlim(c(-100, 10)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+### Plotting pre (red) & post (blue) biomass ~ burn class
+
+</br>
+
+Red is pre-fire visit whereas blue is post-fire visit biomass. No filter on SWHW or biomass gain/loss.
+
+Doesn't seem to be much difference there...
+
+```{r, echo = FALSE}
+
+raw_dat %>%
+  select(PLOT_FIADB, BURN, PRE, POST, perc_diff) %>%
+  distinct() %>%
+  #filter(perc_diff < 0) %>%
+  ggplot() +
+  geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
+  geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
+  theme_tufte() +
+  ylab("Biomass C (Mg/ha)") +
+  xlab("Burn Class") +
+  theme(panel.grid.major = element_blank())
+
+```
+
+### Repeating the same plot, but for softwoods and only those that experienced losses
+
+</br>
+
+Perhaps a trend of slightly greater loss in biomass post-fire (blue plots) for single-burn plots.
+
+```{r, echo = FALSE}
+
+raw_dat %>%
+  distinct() %>%
+  filter(perc_diff < 0) %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  select(PLOT_FIADB, BURN, PRE, POST, perc_diff, OWNGRPCD) %>%
+  distinct() %>%
+  ungroup() %>%
+  ggplot() +
+  geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
+  geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
+  theme_tufte() +
+  ylab("Biomass C (Mg/ha)") +
+  xlab("Burn Class") +
+  theme(panel.grid.major = element_blank())
+
+```
+
+### Looking at the differences in pre- vs. post-fire biomass by ownership group code & for softwoods only.
+
+</br>
+
+Post-fire biomass is definitely lower on state and private lands... bit of a wash on federal lands.
+
+```{r, echo = FALSE}
+
+raw_dat %>%
+  distinct() %>%
+  filter(perc_diff < 0) %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  select(PLOT_FIADB, BURN, PRE, POST, perc_diff, OWNGRPCD) %>%
+  distinct() %>%
+  ungroup() %>%
+  ggplot() +
+  facet_grid(. ~ OWNGRPCD) + 
+  geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
+  geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
+  theme_bw() +
+  ylab("Biomass C (Mg/ha)") +
+  xlab("Burn Class") +
+  theme(panel.grid.major = element_blank())
+
+```
+
+
+### Running a few perhaps-too-early models
+
+</br>
+
+Data structure is as follows:
+
+  - POST = post-fire biomass
+  - PRE = pre-fire biomass
+  - BURN = burn class
+  - perc_diff = percent difference between POST and PRE
+  - TimeSinceFire = number of yrs between post-visit and fire
+  - TimeBeforeFire = number of yrs between pre-visit and fire
+
+</br>
+
+Example head of data:
+
+```{r, echo = FALSE}
+
+mdl_dat <- raw_dat %>%
+  filter(perc_diff <= 0) %>%
+  select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
+  distinct()
+
+head(mdl_dat)
+
+```
+
+</br>
+
+### Run a simple model on the data, BOTH hardwood and softwood
+
+</br>
+
+Total of 230 distinct plots.
+
+Don't find any effect for burn class. Find strong effects for pre-fire biomass, ownership group, SWHW class.
+
+Weak effect for single burn vs. reburn
+
+```{r, echo = FALSE}
+
+mdl1 <- glm(POST ~ BURN + PRE + TimeSinceFire + TimeBeforeFire + OWNGRPCD, data = mdl_dat)
+
+summary(mdl1)
+            
+```
+
+</br>
+
+### Repeat for only softwoods
+
+Total of 123 plots included in the model.
+
+Seems to find a weak effect for burn class. 
+Not particularly convincing and things are likely to change with additional data or changing calculations.
+
+```{r, echo = FALSE}
+
+mdl_dat <- raw_dat %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  ungroup() %>%
+  filter(perc_diff <= 0) %>%
+  select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
+  distinct()
+
+mdl1 <- glm(POST ~ BURN + PRE + TimeSinceFire + TimeBeforeFire + OWNGRPCD, data = mdl_dat)
+
+summary(mdl1)
+            
+```
+
+</br>
+
+### Questions/points for further discussion
+
+  - Would appear to be pretty messy with variable results depending on what's included... but something might be there.
+  - Clear that there appears to be a strong effect for both pre-fire biomass and ownership group, will want to keep these in the modeling.
+  - Is there a better model form to be using?
+  - How do we refine the comparisons such that there would be stronger effects?
+      - Likely need to go down to the condition level - ownership is a little bit messy in the table (multiple entries for some plots, though certainty the minority)
+      - Can look by region?
+      - Better calculations of biomass?
+  - Stronger effects for other variables?
+      - Seedlings?
+      - Number of species on plots?
+      - Dead wood?
+      
+</br>
