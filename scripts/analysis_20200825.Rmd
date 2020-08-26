@@ -1,8 +1,11 @@
 ---
-title: "Preliminary Analyses"
-author: "Jacob Bukoski"
-date: "8/25/2020"
-output: html_document
+title: "Preliminary analyses for FIA fire work"
+date: "8/26/2020"
+output:
+  pdf_document: default
+  html_document: default
+fig_width: 6
+fig_height: 3
 ---
 
 ```{r, echo = FALSE, message = FALSE}
@@ -11,8 +14,8 @@ library(ggthemes)
 ```
 
 
-## Update on FIA work - August 25, 2020
-
+## Update on FIA work - August 26, 2020
+  
 </br>
 
   1. Gathered data for single burn and reburn plots from the periodic inventories, the R5 inventories and the annual inventories (with a ton of Jeremy's help - thank you!)
@@ -24,6 +27,7 @@ library(ggthemes)
       - Most pre-fire measurements come from R5 database. Very few pre-burn visits were found in the annual data - most are post-fire.
   6. Have calculated biomass for the plots that are available, took some time to understand different designs and identify different variables
       - Calculating biomass estimate from each plot in Mg C ha^-1
+      - Cacluated at plot level rather than condition level - will need to go back and re-run things.
       - Filtered all tree records to just those that were > 1 in diameter (to align periodic and R5 with annual)
   7. For plots with pre-burn and post-burn measurements of biomass, we had:
       - 154 reburn plots (78 softwood, 87 hardwood)
@@ -34,7 +38,7 @@ library(ggthemes)
       - percent change (100 * (post - pre / pre))
       - Post-Fire to Burn time (yrs)
       - Burn to Pre-Fire time (yrs)
-  9. Things get a bit wonky with the percent change, so I was looking at things in terms of loss (i.e., precent change > -100 & < 0) and gain (percent change > 0)
+  9. Things get a bit weird with the percent change, so I was looking at things in terms of loss (i.e., precent change > -100 & < 0) and gain (percent change > 0)
 
 </br>
 
@@ -95,7 +99,9 @@ raw_dat %>%
 
 Doesn't seem to be much visual difference?
 
-```{r, echo = F, warning = F, message = F}
+&nbsp;
+
+```{r, echo = F, warning = F, message = F, fig.height = 3, fig.width = 5}
 
 raw_dat %>%
   group_by("PLOT_FIADB") %>%
@@ -120,7 +126,9 @@ Red is pre-fire visit whereas blue is post-fire visit biomass. No filter on SWHW
 
 Doesn't seem to be much difference there...
 
-```{r, echo = FALSE}
+&nbsp;
+
+```{r, echo = FALSE, fig.width = 5, fig.height = 4}
 
 raw_dat %>%
   select(PLOT_FIADB, BURN, PRE, POST, perc_diff) %>%
@@ -129,10 +137,11 @@ raw_dat %>%
   ggplot() +
   geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
   geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
-  theme_tufte() +
+  theme_bw() +
   ylab("Biomass C (Mg/ha)") +
   xlab("Burn Class") +
-  theme(panel.grid.major = element_blank())
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
 ```
 
@@ -142,7 +151,9 @@ raw_dat %>%
 
 Perhaps a trend of slightly greater loss in biomass post-fire (blue plots) for single-burn plots.
 
-```{r, echo = FALSE}
+&nbsp;
+
+```{r, echo = FALSE, fig.width = 5, fig.height = 4}
 
 raw_dat %>%
   distinct() %>%
@@ -155,10 +166,11 @@ raw_dat %>%
   ggplot() +
   geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
   geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
-  theme_tufte() +
+  theme_bw() +
   ylab("Biomass C (Mg/ha)") +
   xlab("Burn Class") +
-  theme(panel.grid.major = element_blank())
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
 ```
 
@@ -168,7 +180,9 @@ raw_dat %>%
 
 Post-fire biomass is definitely lower on state and private lands... bit of a wash on federal lands.
 
-```{r, echo = FALSE}
+&nbsp;
+
+```{r, echo = FALSE, fig.width = 5.5, fig.height = 4}
 
 raw_dat %>%
   distinct() %>%
@@ -185,7 +199,8 @@ raw_dat %>%
   theme_bw() +
   ylab("Biomass C (Mg/ha)") +
   xlab("Burn Class") +
-  theme(panel.grid.major = element_blank())
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
 ```
 
@@ -204,6 +219,8 @@ Data structure is as follows:
   - TimeBeforeFire = number of yrs between pre-visit and fire
 
 </br>
+
+&nbsp;
 
 Example head of data:
 
@@ -226,9 +243,8 @@ head(mdl_dat)
 
 Total of 230 distinct plots.
 
-Don't find any effect for burn class. Find strong effects for pre-fire biomass, ownership group, SWHW class.
-
-Weak effect for single burn vs. reburn
+Find a very weak effect for burn class. 
+Find strong effects for pre-fire biomass & ownership group.
 
 ```{r, echo = FALSE}
 
@@ -240,12 +256,17 @@ summary(mdl1)
 
 </br>
 
+&nbsp;
+
 ### Repeat for only softwoods
 
 Total of 123 plots included in the model.
 
 Seems to find a weak effect for burn class. 
 Not particularly convincing and things are likely to change with additional data or changing calculations.
+Strong effects for both pre-fire biomass and ownership group code.
+
+&nbsp;
 
 ```{r, echo = FALSE}
 
@@ -257,7 +278,7 @@ mdl_dat <- raw_dat %>%
   select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
   distinct()
 
-mdl1 <- glm(POST ~ BURN + PRE + TimeSinceFire + TimeBeforeFire + OWNGRPCD, data = mdl_dat)
+mdl1 <- glm(POST ~ BURN + PRE + TimeBeforeFire + TimeSinceFire + OWNGRPCD, data = mdl_dat)
 
 summary(mdl1)
             
@@ -265,17 +286,20 @@ summary(mdl1)
 
 </br>
 
+&nbsp;
+
 ### Questions/points for further discussion
 
   - Would appear to be pretty messy with variable results depending on what's included... but something might be there.
-  - Clear that there appears to be a strong effect for both pre-fire biomass and ownership group, will want to keep these in the modeling.
+  - Clear that there are strong effects for both pre-fire biomass and ownership group, will want to keep these in the modeling.
   - Is there a better model form to be using?
   - How do we refine the comparisons such that there would be stronger effects?
-      - Likely need to go down to the condition level - ownership is a little bit messy in the table (multiple entries for some plots, though certainty the minority)
+      - Likely need to go down to the condition level - ownership is a little bit messy in the table (multiple entries for some plots, though certainty the minority), adding in forest type code made things more significant, but mostly because of erroneously adding observations (pseudorep), might clear up at condition level.
       - Can look by region?
       - Better calculations of biomass?
   - Stronger effects for other variables?
       - Seedlings?
+      - Vegetation cover?
       - Number of species on plots?
       - Dead wood?
       

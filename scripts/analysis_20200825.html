@@ -462,16 +462,16 @@ summary {
 </ul>
 <p></br></p>
 <p>Example head of data:</p>
-<pre><code>## # A tibble: 6 x 10
+<pre><code>## # A tibble: 6 x 8
 ##   PLOT_FIADB  POST   PRE BURN  perc_diff TimeSinceFire TimeBeforeFire
 ##        &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;dbl&gt;         &lt;dbl&gt;          &lt;dbl&gt;
-## 1      40143  17.8  84.3 sing…     -79.0             1              8
-## 2      40143  17.8  84.3 sing…     -79.0             1              8
-## 3      40143  17.8  84.3 sing…     -79.0             1              8
-## 4      41138  42.9 216.  sing…     -80.1             1              8
-## 5      41138  42.9 216.  sing…     -80.1             1              8
-## 6      41156  54.7 102.  sing…     -46.5             1              8
-## # … with 3 more variables: OWNGRPCD &lt;dbl&gt;, FORTYPCD &lt;dbl&gt;, SWHW &lt;chr&gt;</code></pre>
+## 1      40143  17.8  84.3 sing…   -79.0               1              8
+## 2      40143  17.8  84.3 sing…   -79.0               1              8
+## 3      41138  42.9 216.  sing…   -80.1               1              8
+## 4      41156  54.7 102.  sing…   -46.5               1              8
+## 5      45532  19.4 226.  sing…   -91.4               1              8
+## 6      46252  99.7 100.  sing…    -0.740             1              8
+## # … with 1 more variable: OWNGRPCD &lt;dbl&gt;</code></pre>
 <p></br></p>
 </div>
 <div id="run-a-simple-model-on-the-data-both-hardwood-and-softwood" class="section level3">
@@ -483,31 +483,29 @@ summary {
 <pre><code>## 
 ## Call:
 ## glm(formula = POST ~ BURN + PRE + TimeSinceFire + TimeBeforeFire + 
-##     OWNGRPCD + SWHW, data = mdl_dat)
+##     OWNGRPCD, data = mdl_dat)
 ## 
 ## Deviance Residuals: 
 ##     Min       1Q   Median       3Q      Max  
-## -193.06   -23.99    -1.43    24.71   370.74  
+## -215.92   -25.59    -0.23    26.86   324.01  
 ## 
 ## Coefficients:
-##                   Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)       68.69771    7.87158   8.727  &lt; 2e-16 ***
-## BURNsingle       -16.70414    7.02000  -2.380 0.017897 *  
-## PRE                0.41243    0.02623  15.724  &lt; 2e-16 ***
-## TimeSinceFire     -0.29557    1.21240  -0.244 0.807541    
-## TimeBeforeFire    -0.88445    0.73175  -1.209 0.227638    
-## OWNGRPCD          -1.55715    0.32043  -4.860 1.81e-06 ***
-## SWHW2_Hardwoods  -23.47989    6.55489  -3.582 0.000392 ***
-## SWHW3_Nonstocked -32.79558    8.23595  -3.982 8.39e-05 ***
+##                 Estimate Std. Error t value Pr(&gt;|t|)    
+## (Intercept)     55.21179    8.47699   6.513 4.36e-10 ***
+## BURNsingle     -15.35255    8.67065  -1.771 0.077907 .  
+## PRE              0.50026    0.03147  15.895  &lt; 2e-16 ***
+## TimeSinceFire   -1.76425    1.48746  -1.186 0.236779    
+## TimeBeforeFire  -1.48134    0.86135  -1.720 0.086776 .  
+## OWNGRPCD        -1.45465    0.38831  -3.746 0.000226 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## (Dispersion parameter for gaussian family taken to be 2663.022)
+## (Dispersion parameter for gaussian family taken to be 3015.51)
 ## 
-##     Null deviance: 1840171  on 341  degrees of freedom
-## Residual deviance:  889449  on 334  degrees of freedom
-##   (84 observations deleted due to missingness)
-## AIC: 3677.9
+##     Null deviance: 1533693  on 242  degrees of freedom
+## Residual deviance:  714676  on 237  degrees of freedom
+##   (1 observation deleted due to missingness)
+## AIC: 2644.3
 ## 
 ## Number of Fisher Scoring iterations: 2</code></pre>
 <p></br></p>
@@ -519,30 +517,28 @@ summary {
 <pre><code>## 
 ## Call:
 ## glm(formula = POST ~ BURN + PRE + TimeSinceFire + TimeBeforeFire + 
-##     OWNGRPCD + FORTYPCD, data = mdl_dat)
+##     OWNGRPCD, data = mdl_dat)
 ## 
 ## Deviance Residuals: 
-##     Min       1Q   Median       3Q      Max  
-## -185.57   -30.66    -0.82    29.33   322.23  
+##      Min        1Q    Median        3Q       Max  
+## -219.772   -32.216    -1.892    29.280   264.185  
 ## 
 ## Coefficients:
 ##                 Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)     97.15871   13.48809   7.203 1.42e-11 ***
-## BURNsingle     -31.18340   10.70759  -2.912  0.00403 ** 
-## PRE              0.46467    0.03495  13.297  &lt; 2e-16 ***
-## TimeSinceFire   -1.11545    2.02615  -0.551  0.58262    
-## TimeBeforeFire  -1.17484    1.22370  -0.960  0.33827    
-## OWNGRPCD        -2.28026    0.49383  -4.618 7.23e-06 ***
-## FORTYPCD        -0.03343    0.01434  -2.331  0.02085 *  
+## (Intercept)     85.14041   15.01829   5.669  9.8e-08 ***
+## BURNsingle     -30.49610   13.75251  -2.217  0.02844 *  
+## PRE              0.55906    0.04483  12.469  &lt; 2e-16 ***
+## TimeSinceFire   -2.88003    2.49728  -1.153  0.25106    
+## TimeBeforeFire  -2.20285    1.52205  -1.447  0.15038    
+## OWNGRPCD        -2.08527    0.63902  -3.263  0.00143 ** 
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## (Dispersion parameter for gaussian family taken to be 3495.971)
+## (Dispersion parameter for gaussian family taken to be 3740.295)
 ## 
-##     Null deviance: 1463492  on 192  degrees of freedom
-## Residual deviance:  650251  on 186  degrees of freedom
-##   (37 observations deleted due to missingness)
-## AIC: 2131.3
+##     Null deviance: 1174577  on 127  degrees of freedom
+## Residual deviance:  456316  on 122  degrees of freedom
+## AIC: 1424.1
 ## 
 ## Number of Fisher Scoring iterations: 2</code></pre>
 <p></br></p>
@@ -550,11 +546,20 @@ summary {
 <div id="questionspoints-for-further-discussion" class="section level3">
 <h3>Questions/points for further discussion</h3>
 <ul>
-<li>Would appear to be pretty messy with a variable effect depending on what’s included… but something might be there.</li>
-<li>Clear that there appears to be a strong effect for both pre-fire biomass and ownership group, will want to keep these in the modeling…</li>
+<li>Would appear to be pretty messy with variable results depending on what’s included… but something might be there.</li>
+<li>Clear that there appears to be a strong effect for both pre-fire biomass and ownership group, will want to keep these in the modeling.</li>
+<li>Is there a better model form to be using?</li>
 <li>How do we refine the comparisons such that there would be stronger effects?
 <ul>
-<li>Can look by region…</li>
+<li>Likely need to go down to the condition level - ownership is a little bit messy in the table (multiple entries for some plots, though certainty the minority)</li>
+<li>Can look by region?</li>
+<li>Better calculations of biomass?</li>
+</ul></li>
+<li>Stronger effects for other variables?
+<ul>
+<li>Seedlings?</li>
+<li>Number of species on plots?</li>
+<li>Dead wood?</li>
 </ul></li>
 </ul>
 <p></br></p>
