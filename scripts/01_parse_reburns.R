@@ -379,7 +379,7 @@ prtly_forAndy2 <- prtly_forAndy %>%
 #write_csv(distinct(filter(prtly_forAndy, "1_Softwoods" %in% swhw)), "./data/forAndy/01_prtly_confirmed_SW.csv")
 write_csv(distinct(prtly_forAndy2), "./data/forAndy/01_prtly_confirmed_SW_AUGUST.csv")
 write_csv(distinct(filter(prtly_forAndy, !("1_Softwoods" %in% swhw))), "./data/forAndy/03_prtly_confirmed_other.csv")
-
+  
 #-----------------------------------
 #######################
 ## Unconfirmed Plots ##
