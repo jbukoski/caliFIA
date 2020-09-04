@@ -142,6 +142,27 @@ conf_plts <- bind_rows(singles, reburns) %>%
 
 n_distinct(conf_plts$PLOT_FIADB)
 
+#----------------------------
+cntyCds <- read_csv("./data/ca_cnty_cds.csv", col_names = T, 
+                    cols(CNTY_NAME = col_character(), COUNTYCD = col_double())) %>%
+  rename_all(tolower)
+
+forTypRef <- read_csv("./data/processed/forestTypeRef.csv")
+
+conf_plts %>% 
+  filter(PLOT_FIADB %in% c(74378, 81400, 73124, 61802, 83590)) %>%
+  left_join(select(annTables$PLOT, PLOT_FIADB, COUNTYCD)) %>%
+  left_join(rename_all(cntyCds, toupper)) %>%
+  left_join(select(annTables$COND, STATECD, PLOT_FIADB, CONDID, INVYR, OWNGRPCD, FORTYPCD)) %>%
+  left_join(rename_all(forTypRef, toupper)) %>%
+  View()
+
+idbTables$PLOT %>%
+  filter(PLOT_FIADB)
+
+linkTable$LINK_CONF %>%
+  filter(PLOT_FIADB %in% c(74378, 81400, 73124, 61802, 83590))
+
 # 1114 confirmed plots with single burns or reburns
 
 #-------------------------------
