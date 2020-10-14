@@ -376,15 +376,24 @@ prtly_forAndy2 <- prtly_forAndy %>%
   filter("1_Softwoods" %in% swhw) %>%
   filter(!(plot_fiadb %in% alrdy_chkd$plot_fiadb))
 
+
 #write_csv(distinct(filter(prtly_forAndy, "1_Softwoods" %in% swhw)), "./data/forAndy/01_prtly_confirmed_SW.csv")
 write_csv(distinct(prtly_forAndy2), "./data/forAndy/01_prtly_confirmed_SW_AUGUST.csv")
-write_csv(distinct(filter(prtly_forAndy, !("1_Softwoods" %in% swhw))), "./data/forAndy/03_prtly_confirmed_other.csv")
-  
-#-----------------------------------
+
+prtly_other <- prtly_forAndy %>%
+  group_by(plot_fiadb) %>%
+  filter(!("1_Softwoods" %in% swhw)) %>%
+  distinct()
+
+write_csv(prtly_other, "./data/forAndy/03_prtly_confirmed_other.csv")
+
+
+
+#---------------------------------------------------------------------------------
 #######################
 ## Unconfirmed Plots ##
 #######################
-
+#----------------------------------------
 uncnfrmd <- dat2process %>%
   filter(match == FALSE, n_match == 1) 
 
@@ -439,8 +448,14 @@ un_p2 <- uncnfrmd %>%
   ungroup() %>%
   filter(perim_fire >= 1960)
 
+
 write_csv(distinct(filter(un_p2, "1_Softwoods" %in% swhw)), "./data/forAndy/02_unconfirmed_SW.csv")
-write_csv(distinct(filter(un_p2, !("1_Softwoods" %in% swhw))), "./data/forAndy/04_unconfirmed_other.csv")
+
+unconf_other <- un_p2 %>%
+  group_by(plot_fiadb) %>%
+  filter(!("1_Softwoods" %in% swhw))
+
+write_csv(unconf_other, "./data/forAndy/04_unconfirmed_other.csv")
 
 #-------------------------
 # Write out the confirmed reburns
