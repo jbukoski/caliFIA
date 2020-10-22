@@ -367,18 +367,18 @@ prtly_forAndy <- prtly_p8 %>%
 
 n_distinct(prtly_forAndy$plot_fiadb)
 
-#---------------------------
+#---------------------------  
 
 alrdy_chkd <- read_csv("./data/forAndy/01_prtly_confirmed_SW.csv")
 
-prtly_forAndy2 <- prtly_forAndy %>%
+prtly_sw_August <- prtly_forAndy %>%
   group_by(plot_fiadb) %>%
   filter("1_Softwoods" %in% swhw) %>%
-  filter(!(plot_fiadb %in% alrdy_chkd$plot_fiadb))
-
+  filter(!(plot_fiadb %in% alrdy_chkd$plot_fiadb)) %>%
+  distinct()
 
 #write_csv(distinct(filter(prtly_forAndy, "1_Softwoods" %in% swhw)), "./data/forAndy/01_prtly_confirmed_SW.csv")
-write_csv(distinct(prtly_forAndy2), "./data/forAndy/01_prtly_confirmed_SW_AUGUST.csv")
+write_csv(prtly_sw_August, "./data/forAndy/01_prtly_confirmed_SW_AUGUST.csv")
 
 prtly_other <- prtly_forAndy %>%
   group_by(plot_fiadb) %>%
@@ -448,20 +448,32 @@ un_p2 <- uncnfrmd %>%
   ungroup() %>%
   filter(perim_fire >= 1960)
 
+unconf_sw <- un_p2 %>%
+  group_by(plot_fiadb) %>%
+  filter("1_Softwoods" %in% swhw) %>%
+  distinct()
 
-write_csv(distinct(filter(un_p2, "1_Softwoods" %in% swhw)), "./data/forAndy/02_unconfirmed_SW.csv")
+write_csv(unconf_sw, "./data/forAndy/02_unconfirmed_SW.csv")
 
 unconf_other <- un_p2 %>%
   group_by(plot_fiadb) %>%
-  filter(!("1_Softwoods" %in% swhw))
+  filter(!("1_Softwoods" %in% swhw)) %>%
+  distinct()
 
 write_csv(unconf_other, "./data/forAndy/04_unconfirmed_other.csv")
+
+#-------------------------
+# pull lists of plots from each to check repeats
+
+l1 <- prtly_sw_August %>% pull(plot_fiadb) %>% unique()
+l2 <- prtly_other %>% pull(plot_fiadb) %>% unique()
+l3 <- unconf_sw %>% pull(plot_fiadb) %>% unique()
+l4 <- unconf_other %>% pull(plot_fiadb) %>% unique()
 
 #-------------------------
 # Write out the confirmed reburns
 
 write_csv(arrange(confirmed, plot_fiadb, measyear, fia_fire), "./data/processed/conf_reburns.csv")
-
 
 #---------------------------
 # Clean up
