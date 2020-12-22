@@ -157,8 +157,6 @@ conf_plts %>%
   left_join(rename_all(forTypRef, toupper)) %>%
   View()
 
-idbTables$PLOT %>%
-  filter(PLOT_FIADB)
 
 linkTable$LINK_CONF %>%
   filter(PLOT_FIADB %in% c(74378, 81400, 73124, 61802, 83590))
@@ -343,28 +341,10 @@ dat2plt %>%
   View
 
 #---------------------------------
-# Early modeling
-  
-library(lme4)
+# Plotting the effect
 
-dat4stats <- dat2plt %>%
-  pivot_wider(names_from = VISIT, values_from = c_mgha) %>%
-  select(-FIRE, perc_diff) %>%
-  filter(!(is.na(PRE) & is.na(POST))) %>%
-  group_by(PLOT_FIADB) %>%
-  mutate(PRE = first(na.omit(PRE)),
-         POST = first(na.omit(POST))) %>%
-  select(-YEAR)
-  
-  
-dat4stats %>%
-  filter(perc_diff < 0) %>%
-  ggplot() +
-  geom_boxplot(aes(x = BURN, y = PRE), col = "red", alpha = 0.1, width = 0.3) +
-  geom_boxplot(aes(x = BURN, y = POST), col = "blue", alpha = 0.1, width = 0.3) +
-  theme_bw() +
-  ylab("Biomass C (Mg/ha)") +
-  xlab("Burn Class")
+library(gridExtra)
+library(ggpubr)
 
 forTypRef <- read_csv("./data/processed/forestTypeRef.csv")
 
@@ -373,6 +353,160 @@ plt_types <- annTables$COND %>%
   select(STATECD, PLOT_FIADB, CONDID, INVYR, OWNGRPCD, FORTYPCD) %>%
   left_join(forTypRef, by = c("FORTYPCD" = "fortypcd")) %>%
   select(STATECD:FORTYPCD, SWHW = swhw)
+
+dat4stats <- dat2plt %>%
+  pivot_wider(names_from = VISIT, values_from = c_mgha) %>%
+  select(-FIRE, perc_diff) %>%
+  filter(!(is.na(PRE) & is.na(POST))) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(PRE = first(na.omit(PRE)),
+         POST = first(na.omit(POST))) %>%
+  select(-YEAR) %>%
+  left_join(plt_types) %>%
+  left_join(timeSncFire)
+
+dat4stats %>%
+  group_by(SWHW, BURN) %>%
+  summarize(n = n_distinct(PLOT_FIADB))
+
+p1 <- dat4stats %>%
+  pivot_longer(cols = c("PRE", "POST"), names_to = c("msrmt"), values_to = "vals") %>%
+  mutate(msrmt = factor(msrmt, levels = c("PRE", "POST")),
+         BURN = factor(ifelse(BURN == "single", "Single", "Reburn"), levels = c("Single", "Reburn"))) %>%
+  group_by(PLOT_FIADB) %>%
+  #mutate(group = ifelse("1_Softwoods" %in% swhw, "Softwoods", ))
+  ggplot() +
+  geom_boxplot(aes(x = BURN, y = vals, col = msrmt, fill = msrmt), alpha = 0.2, width = 0.7) +
+  theme_bw() +
+  labs(x = "Burn Class", y = "Biomass C (Mg/ha)", title = "All Plots") +
+  scale_colour_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  scale_fill_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  theme(legend.position = "bottom",
+        axis.title.x = element_blank())
+
+leg <- get_legend(p1)
+
+
+p2 <- dat4stats %>%
+  pivot_longer(cols = c("PRE", "POST"), names_to = c("msrmt"), values_to = "vals") %>%
+  mutate(msrmt = factor(msrmt, levels = c("PRE", "POST")),
+         BURN = factor(ifelse(BURN == "single", "Single", "Reburn"), levels = c("Single", "Reburn"))) %>%
+  #filter(perc_diff < 0) %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  ggplot() +
+  geom_boxplot(aes(x = BURN, y = vals, col = msrmt, fill = msrmt), alpha = 0.2, width = 0.7) +
+  theme_bw() +
+  labs(title = "Softwoods") +
+  scale_colour_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  scale_fill_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank())
+
+p3 <- dat4stats %>%
+  pivot_longer(cols = c("PRE", "POST"), names_to = c("msrmt"), values_to = "vals") %>%
+  mutate(msrmt = factor(msrmt, levels = c("PRE", "POST")),
+         BURN = factor(ifelse(BURN == "single", "Single", "Reburn"), levels = c("Single", "Reburn"))) %>%
+  #filter(perc_diff < 0) %>%
+  group_by(PLOT_FIADB) %>%
+  filter("2_Hardwoods" %in% SWHW) %>%
+  ggplot() +
+  geom_boxplot(aes(x = BURN, y = vals, col = msrmt, fill = msrmt), alpha = 0.2, width = 0.7) +
+  theme_bw() +
+  labs(title = "Hardwoods") +
+  scale_colour_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  scale_fill_manual(name = "Measurement", labels = c("Pre-Fire", "Post-Fire"), values = c("red", "blue")) +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank())
+
+
+joined_plt <- grid.arrange(arrangeGrob(p1 + theme(legend.position = "none"), p2, p3, nrow = 1), 
+                           leg, nrow = 2, heights = c(10,1))
+
+ggsave(joined_plt, filename = "./figs/fig3_plts.jpg", height = 4, width = 8, units = "in")
+
+
+#------------------------------
+# Testing for an effect
+
+library(lme4)
+
+scaled_dat <- dat4stats
+scaled_dat$POST <- scale(scaled_dat$POST)[, 1]
+scaled_dat$PRE <- scale(scaled_dat$PRE)[, 1]
+
+scaled_dat %>%
+  group_by(PLOT_FIADB) %>%
+  summarize(n = n())
+
+## All plots
+
+mdl_dat <- scaled_dat %>%
+  group_by(PLOT_FIADB) %>%
+  #filter("1_Softwoods" %in% SWHW) %>%
+  ungroup() %>%
+  filter(perc_diff <= 0) %>%
+  select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
+  distinct() %>%
+  arrange(PLOT_FIADB) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n == 1)
+
+mdl_all <- glm(POST ~ BURN + PRE + TimeBeforeFire + TimeSinceFire + OWNGRPCD, data = mdl_dat)
+
+summary(mdl_all)
+pchisq(mdl_all$deviance, mdl_all$df.residual)
+anova(mdl_all, test = "Chisq")
+
+## Softwood plots
+
+mdl_dat <- dat4stats %>%
+  group_by(PLOT_FIADB) %>%
+  filter("1_Softwoods" %in% SWHW) %>%
+  ungroup() %>%
+  filter(perc_diff <= 0) %>%
+  select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
+  distinct() %>%
+  arrange(PLOT_FIADB) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n == 1)
+
+mdl_sw <- glm(POST ~ BURN + PRE + TimeBeforeFire + TimeSinceFire + OWNGRPCD, data = mdl_dat)
+
+summary(mdl_sw)
+pchisq(mdl_sw$deviance, mdl_sw$df.residual)
+anova(mdl_sw, test = "Chisq")
+
+
+## Hardwood plots
+
+mdl_dat <- dat4stats %>%
+  group_by(PLOT_FIADB) %>%
+  filter("2_Hardwoods" %in% SWHW) %>%
+  ungroup() %>%
+  filter(perc_diff <= 0) %>%
+  select(PLOT_FIADB, POST, PRE, BURN, perc_diff, TimeSinceFire, TimeBeforeFire, OWNGRPCD) %>%
+  distinct() %>%
+  arrange(PLOT_FIADB) %>%
+  group_by(PLOT_FIADB) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n == 1)
+
+mdl_hw <- glm(POST ~ BURN + PRE + TimeBeforeFire + TimeSinceFire + OWNGRPCD, data = mdl_dat)
+
+summary(mdl_hw)
+pchisq(mdl_hw$deviance, mdl_hw$df.residual)
+anova(mdl_hw, test = "Chisq")
+
 
 #------------------------------
 # Final data frame, write out results for now.

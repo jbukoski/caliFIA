@@ -58,6 +58,18 @@ rbrns_jnd %>%
   View
 
 #-----------------------
+# Summary of plots
+
+sngls_jnd %>%
+  group_by(swhw) %>%
+  summarize(n = n_distinct(plot_fiadb))
+
+rbrns_jnd %>%
+  group_by(swhw) %>%
+  summarize(n = n_distinct(plot_fiadb))
+
+
+#-----------------------
 # Evan's code for generating maps
 
 library(rgdal)
@@ -77,7 +89,7 @@ cntyData <- CAcounty@data %>%
 # Takes in a df (either reburns or singles)
 
 prepDatforPlot <- function(df) {
-
+  
   plot_join <- df %>% 
     left_join(cond) %>%
     left_join(plot, by = c("plot_fiadb", "invyr", "measyear")) %>%
@@ -106,8 +118,9 @@ prepDatforPlot <- function(df) {
   
   cntyJoin <- cntyData %>% 
     left_join(select(plts_per_cnty, countycd, sw_n, hw_n, ns_n, na_n, ttl_n)) %>%
-    distinct() %>%
-    mutate(cnty_name = as.factor(cnty_name))
+    distinct()
+  
+  #%>%  mutate(cnty_name = as.factor(cnty_name))
   
   return(cntyJoin)
   
@@ -116,27 +129,45 @@ prepDatforPlot <- function(df) {
 dat2plot <- CAcounty
 
 dat2plot@data <- CAcounty@data %>%
-  left_join(prepDatforPlot(singles), by = c("NAME" = "cnty_name")) %>%
-  left_join(prepDatforPlot(reburns), by = c("NAME" = "cnty_name"), suffix = c("_sngl", "_rbrn")) %>%
-  as.data.frame()
+  left_join(prepDatforPlot(singles), by = c("NAME" = "name")) %>%
+  left_join(prepDatforPlot(reburns), by = c("NAME" = "name"), suffix = c("_sngl", "_rbrn")) %>%
+  as.data.frame() %>%
+  mutate(sw_n_sngl = replace_na(sw_n_sngl, 0),
+         hw_n_sngl = replace_na(hw_n_sngl, 0),
+         ns_n_sngl = replace_na(ns_n_sngl, 0),
+         na_n_sngl = replace_na(na_n_sngl, 0),
+         ttl_n_sngl = replace_na(ttl_n_sngl, 0),
+         sw_n_rbrn = replace_na(sw_n_rbrn, 0),
+         hw_n_rbrn = replace_na(hw_n_rbrn, 0),
+         ns_n_rbrn = replace_na(ns_n_rbrn, 0),
+         na_n_rbrn = replace_na(na_n_rbrn, 0),
+         ttl_n_rbrn = replace_na(ttl_n_rbrn, 0))
 
 # using tmap function qtm, you can display plot density easily  
 
-sw_sngl <- qtm(dat2plot, "sw_n_sngl", fill.n = 8) +
-  tm_layout(main.title = "Single Softwoods")
+sw_sngl <- tm_shape(dat2plot) +
+  tm_fill("sw_n_sngl", title = "Single Softwoods", breaks = c(0, 1, 15, 30, 45, 60, 75)) +
+  tm_borders() +
+  tm_layout(frame = FALSE)
 
-hw_sngl <- qtm(dat2plot, "hw_n_sngl", fill.n = 8) +
-  tm_layout(main.title = "Single Hardwoods")
+hw_sngl <- tm_shape(dat2plot) +
+  tm_fill("hw_n_sngl", title = "Single Hardwoods", breaks = c(0, 1, 10, 20, 30, 40)) +
+  tm_borders() +
+  tm_layout(frame = FALSE)
 
-sw_rbrn <- qtm(dat2plot, "sw_n_rbrn", fill.n = 8) +
-  tm_layout(main.title = "Reburn Softwoods")
+sw_rbrn <- tm_shape(dat2plot) +
+  tm_fill("sw_n_rbrn", title = "Softwood Reburns", breaks = c(0, 1, 5, 10, 15, 20)) +
+  tm_borders() +
+  tm_layout(frame = FALSE)
 
-hw_rbrn <- qtm(dat2plot, "hw_n_rbrn", fill.n = 8) +
-  tm_layout(main.title = "Reburn Hardwoods")
+hw_rbrn <- tm_shape(dat2plot) +
+  tm_fill("hw_n_rbrn", title = "Hardwood Reburns", breaks = c(0, 1, 5, 10, 15, 20)) +
+  tm_borders() +
+  tm_layout(frame = FALSE)
 
 plt <- tmap_arrange(sw_sngl, hw_sngl, sw_rbrn, hw_rbrn, ncol = 2, nrow = 2)
 
-tmap_save(plt, filename = "./figs/plot_maps.jpg", height = 8, width = 8, units = "in")
+tmap_save(plt, filename = "./figs/plot_maps.jpg", height = 8, width = 6, units = "in")
 
 
 #----------------------------------------------
